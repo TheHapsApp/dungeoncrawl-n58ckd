@@ -80,9 +80,34 @@
   .shopItem .equipBtn{ background:#2fae6b; color:#fff; }
   .shopItem .equipBtn.equipped{ background:#fff; color:#2fae6b; outline:3px solid #2fae6b; }
 
+  /* ---- Map ---- */
+  .biomeGrid{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; max-width:360px; margin:0 auto; }
+  .biomeTile{
+    position:relative; border:none; border-radius:18px; padding:18px 8px 14px; cursor:pointer;
+    color:#fff; text-shadow:1px 1px 0 rgba(0,0,0,0.3); box-shadow:0 5px 0 rgba(0,0,0,0.25);
+    transition:transform .08s ease; grid-column:span 1;
+  }
+  .biomeTile:active{ transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,0.25); }
+  .biomeTile.locked{ opacity:0.55; }
+  .biomeTile .bicon{ font-size:2.2rem; }
+  .biomeTile .bname{ font-weight:bold; font-size:0.9rem; margin-top:4px; }
+  .biomeTile .block{ font-size:0.75rem; margin-top:4px; background:rgba(0,0,0,0.35); border-radius:8px; padding:3px 6px; display:inline-block; }
+  .biomeTile.ocean-tile{ grid-column:span 2; }
+
   /* ---- Dungeon ---- */
+  #breathBadge{
+    display:inline-block; background:rgba(255,255,255,0.85); color:#0f4a5c; font-weight:bold;
+    font-size:0.8rem; border-radius:999px; padding:4px 12px; margin-bottom:8px;
+  }
+  #bossHpBarWrap{
+    position:absolute; top:30px; left:8px; right:8px; pointer-events:none;
+  }
+  #bossHpLabel{ color:#fff; font-weight:bold; font-size:0.78rem; text-shadow:1px 1px 0 rgba(0,0,0,0.6); margin-bottom:2px; text-align:center; }
+  #bossHpBarTrack{ width:100%; height:10px; background:rgba(0,0,0,0.4); border-radius:999px; overflow:hidden; border:2px solid #fff; }
+  #bossHpBarFill{ height:100%; background:#ff5f5f; width:100%; transition:width .15s ease; }
+
   #dungeonWrap{
-    width:100%; max-width:340px; aspect-ratio:4/5; margin:0 auto; border:4px solid #fff;
+    width:100%; max-width:400px; aspect-ratio:4/5; margin:0 auto; border:4px solid #fff;
     border-radius:18px; overflow:hidden; position:relative; box-shadow:0 6px 0 rgba(0,0,0,0.2);
   }
   #dungeonCanvas{ width:100%; height:100%; display:block; touch-action:none; }
@@ -99,7 +124,7 @@
   }
   #waveBanner.show{ opacity:1; }
 
-  .controls{ display:flex; justify-content:space-between; align-items:center; max-width:340px; margin:14px auto 0; }
+  .controls{ display:flex; justify-content:space-between; align-items:center; max-width:400px; margin:14px auto 0; }
   .dpad{ display:grid; grid-template-columns:repeat(3,46px); grid-template-rows:repeat(3,46px); gap:4px; }
   .dpad button{
     background:rgba(255,255,255,0.85); border:3px solid #fff; border-radius:12px; font-size:1.2rem;
@@ -139,8 +164,16 @@
       <div class="equippedRow">Equipped: <span id="equippedWeaponLabel">Wooden Sword 🗡️</span></div>
     </div>
     <div class="row">
-      <button class="bigbtn primary" id="enterDungeonBtn">🚪 Enter the Dungeon</button>
+      <button class="bigbtn primary" id="openMapBtn">🗺️ Explore the Map</button>
     </div>
+  </div>
+
+  <!-- ==== MAP ==== -->
+  <div class="screen" id="screen-map">
+    <button class="homebtn" id="mapHomeBtn">🏠 Home</button>
+    <h2>🗺️ The Map</h2>
+    <p class="sub">Pick a biome to explore. Each one has its own boss!</p>
+    <div class="biomeGrid" id="biomeGrid"></div>
   </div>
 
   <!-- ==== SHOP OVERLAY ==== -->
@@ -148,6 +181,8 @@
     <h2>🧔 The Builder's Trade</h2>
     <div class="emeraldPill">💎 <span id="shopEmeraldCount">0</span> Emeralds</div>
     <div class="shopList" id="shopList"></div>
+    <h2 style="font-size:1.1rem;">🧪 Potions</h2>
+    <div class="shopList" id="potionList"></div>
     <button class="bigbtn secondary" id="shopCloseBtn">✖ Done Trading</button>
   </div>
 
@@ -163,14 +198,19 @@
 
   <!-- ==== DUNGEON ==== -->
   <div class="screen" id="screen-dungeon">
-    <button class="homebtn" id="leaveDungeonBtn">🏠 Leave Dungeon</button>
+    <button class="homebtn" id="leaveDungeonBtn">🗺️ Leave to Map</button>
+    <div id="breathBadge" style="display:none;">🫧 Breathing (potion active)</div>
     <div id="dungeonWrap">
-      <canvas id="dungeonCanvas" width="320" height="400"></canvas>
+      <canvas id="dungeonCanvas" width="400" height="500"></canvas>
       <div class="hud">
         <div id="heartsRow"></div>
         <div id="emeraldHud">💎 0</div>
       </div>
       <div id="waveLabel">Wave 1/3</div>
+      <div id="bossHpBarWrap" style="display:none;">
+        <div id="bossHpLabel"></div>
+        <div id="bossHpBarTrack"><div id="bossHpBarFill"></div></div>
+      </div>
       <div id="waveBanner"></div>
     </div>
     <div class="controls">
@@ -205,20 +245,52 @@ var WEAPONS = {
 };
 var WEAPON_ORDER = ["wood", "stone", "iron", "bow", "axe"];
 
+// ---------- potions (stackable consumables, not equipped like weapons) ----------
+var POTIONS = {
+  waterbreath: { id:"waterbreath", name:"Potion of Water Breathing", emoji:"🧪", cost:6 },
+};
+var POTION_ORDER = ["waterbreath"];
+
 // ---------- monster roster ----------
 // zombie/skeleton/spider/creeper are the familiar Minecraft Dungeons cast,
 // each tweaked a little; slime and ghost are new additions Ben asked for.
 var MONSTER_TYPES = {
-  zombie:   { name:"Grumble Zombie", emoji:"🧟", hp:6, speed:34,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#5b8a4a" },
-  skeleton: { name:"Bony Archer",    emoji:"💀", hp:4, speed:26,  dmg:1, ranged:true,  erratic:false, fuse:false, splits:false, color:"#d8d0b0", shootRange:220, shootCooldown:1800 },
-  spider:   { name:"Web Spider",     emoji:"🕷️", hp:3, speed:52,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5a3d7a" },
-  creeper:  { name:"Boom Creeper",   emoji:"🧨", hp:4, speed:28,  dmg:2, ranged:false, erratic:false, fuse:true,  splits:false, color:"#5ad16a" },
-  slime:    { name:"Slime Blob",     emoji:"🟢", hp:4, speed:24,  dmg:1, ranged:false, erratic:false, fuse:false, splits:true,  color:"#3fd08a" },
-  ghost:    { name:"Ghost Puff",     emoji:"👻", hp:2, speed:36,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfefff" },
+  zombie:    { name:"Grumble Zombie", emoji:"🧟", hp:6, speed:34,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#5b8a4a" },
+  skeleton:  { name:"Bony Archer",    emoji:"💀", hp:4, speed:26,  dmg:1, ranged:true,  erratic:false, fuse:false, splits:false, color:"#d8d0b0", shootRange:220, shootCooldown:1800 },
+  spider:    { name:"Web Spider",     emoji:"🕷️", hp:3, speed:52,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5a3d7a" },
+  creeper:   { name:"Boom Creeper",   emoji:"🧨", hp:4, speed:28,  dmg:2, ranged:false, erratic:false, fuse:true,  splits:false, color:"#5ad16a" },
+  slime:     { name:"Slime Blob",     emoji:"🟢", hp:4, speed:24,  dmg:1, ranged:false, erratic:false, fuse:false, splits:true,  color:"#3fd08a" },
+  ghost:     { name:"Ghost Puff",     emoji:"👻", hp:2, speed:36,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfefff" },
+  sandling:  { name:"Sandling",       emoji:"🏺", hp:5, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#d9b26a" },
+  icesprite: { name:"Ice Sprite",     emoji:"❄️", hp:3, speed:40,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#a9e6ff" },
+  embermite: { name:"Embermite",      emoji:"🔥", hp:4, speed:48,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#ff8a4a" },
+  jellyfin:  { name:"Jellyfin",       emoji:"🪼", hp:3, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#c9a0ff" },
+  eelbite:   { name:"Eelbite",        emoji:"🐍", hp:4, speed:50,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#3fb0a0" },
 };
-var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "slime", "ghost"];
+var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "slime", "ghost", "sandling", "icesprite", "embermite", "jellyfin", "eelbite"];
 
-var TOTAL_WAVES = 3;
+// ---------- bosses (one per biome, each summons its own minions) ----------
+var BOSSES = {
+  forestBoss:  { name:"Elder Treant", emoji:"🌳", hp:40, speed:22, dmg:2, summons:["zombie", "slime"],     summonCount:2, summonCooldown:4000, color:"#2f6b2f" },
+  desertBoss:  { name:"Sand Pharaoh", emoji:"🏺", hp:44, speed:24, dmg:2, summons:["skeleton", "sandling"], summonCount:2, summonCooldown:4000, color:"#c9a04a" },
+  frostBoss:   { name:"Frost Queen",  emoji:"👑", hp:42, speed:26, dmg:2, summons:["ghost", "icesprite"],   summonCount:2, summonCooldown:4000, color:"#8fd6ff" },
+  volcanoBoss: { name:"Magma Titan",  emoji:"👹", hp:50, speed:20, dmg:3, summons:["creeper", "embermite"], summonCount:2, summonCooldown:3800, color:"#ff6b3f" },
+  oceanBoss:   { name:"Abyss Kraken", emoji:"🐙", hp:46, speed:24, dmg:2, summons:["jellyfin", "eelbite"],  summonCount:2, summonCooldown:4000, color:"#2f7ba0" },
+};
+var MAX_LIVE_MONSTERS = 7; // includes the boss itself — keeps summon-spam manageable
+var MAX_BOSS_SUMMONS_TOTAL = 6; // per boss fight
+
+// ---------- biomes (the "map") ----------
+var BIOMES = {
+  forest:  { name:"Whispering Forest", emoji:"🌲", monsterPool:["zombie", "spider", "slime"],       boss:"forestBoss",  bg:"#1f3a1f", requiresPotion:false },
+  desert:  { name:"Sunbaked Desert",   emoji:"🏜️", monsterPool:["skeleton", "creeper", "sandling"],  boss:"desertBoss",  bg:"#5a4326", requiresPotion:false },
+  frost:   { name:"Frozen Peaks",      emoji:"❄️", monsterPool:["ghost", "icesprite", "skeleton"],   boss:"frostBoss",   bg:"#274a5c", requiresPotion:false },
+  volcano: { name:"Molten Crater",     emoji:"🌋", monsterPool:["creeper", "zombie", "embermite"],   boss:"volcanoBoss", bg:"#4a1f1f", requiresPotion:false },
+  ocean:   { name:"Sunken Reef",       emoji:"🌊", monsterPool:["jellyfin", "eelbite"],              boss:"oceanBoss",   bg:"#0f2a3a", requiresPotion:true },
+};
+var BIOME_ORDER = ["forest", "desert", "frost", "volcano", "ocean"];
+
+var TOTAL_WAVES = 3; // regular waves per biome, before the boss wave
 var WAVE_SIZES = [3, 4, 5];
 var PLAYER_MAX_HP = 20; // 10 hearts
 var PLAYER_SPEED = 130; // px/sec
@@ -230,7 +302,7 @@ var CREEPER_BLAST_RADIUS = 50;
 // ---------- save state (persisted) ----------
 var SAVE_KEY = "dungeoncrawl_save_v1";
 function defaultSave(){
-  return { emeralds: 0, ownedWeapons: ["wood"], equippedWeapon: "wood" };
+  return { emeralds: 0, ownedWeapons: ["wood"], equippedWeapon: "wood", potions: { waterbreath: 0 } };
 }
 function loadSave(){
   try {
@@ -238,6 +310,8 @@ function loadSave(){
     if (!raw) return defaultSave();
     var parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.ownedWeapons)) return defaultSave();
+    // older saves (before potions existed) won't have this field — backfill it
+    if (!parsed.potions || typeof parsed.potions !== "object") parsed.potions = { waterbreath: 0 };
     return parsed;
   } catch (e) { return defaultSave(); }
 }
@@ -274,13 +348,18 @@ function waveSize(waveNum){
   return WAVE_SIZES[idx];
 }
 
-function pickWaveMonsters(waveNum, rng){
+// pool defaults to every monster type; pass a biome's monsterPool to keep
+// waves themed to that biome. (pool, rng) can also be called as just (rng)
+// for backward compatibility with earlier callers/tests.
+function pickWaveMonsters(waveNum, pool, rng){
+  if (typeof pool === "function") { rng = pool; pool = null; }
+  pool = pool && pool.length ? pool : MONSTER_ORDER;
   rng = rng || Math.random;
   var n = waveSize(waveNum);
   var picks = [];
   for (var i = 0; i < n; i++){
-    var idx = Math.floor(rng() * MONSTER_ORDER.length);
-    picks.push(MONSTER_ORDER[idx]);
+    var idx = Math.floor(rng() * pool.length);
+    picks.push(pool[idx]);
   }
   return picks;
 }
@@ -302,6 +381,19 @@ function buyWeapon(save, weaponId){
 function equipWeapon(save, weaponId){
   if (save.ownedWeapons.indexOf(weaponId) === -1) return false;
   save.equippedWeapon = weaponId;
+  return true;
+}
+
+function canBuyPotion(save, potionId){
+  var p = POTIONS[potionId];
+  if (!p) return false;
+  return save.emeralds >= p.cost;
+}
+function buyPotion(save, potionId){
+  if (!canBuyPotion(save, potionId)) return false;
+  var p = POTIONS[potionId];
+  save.emeralds -= p.cost;
+  save.potions[potionId] = (save.potions[potionId] || 0) + 1;
   return true;
 }
 
@@ -456,29 +548,109 @@ function renderShop(){
     list.appendChild(row);
   });
 }
+function renderPotionShop(){
+  var list = document.getElementById("potionList");
+  list.innerHTML = "";
+  POTION_ORDER.forEach(function (id) {
+    var p = POTIONS[id];
+    var owned = (save.potions[id] || 0);
+    var row = document.createElement("div");
+    row.className = "shopItem";
+    row.innerHTML =
+      '<div class="icon">' + p.emoji + '</div>' +
+      '<div class="info"><div class="wname">' + p.name + '</div><div class="wstats">You have: ' + owned + '</div></div>';
+    var btn = document.createElement("button");
+    btn.className = "buyBtn";
+    btn.textContent = "💎" + p.cost;
+    btn.disabled = !canBuyPotion(save, id);
+    btn.addEventListener("click", function () {
+      if (buyPotion(save, id)){
+        persistSave(save);
+        renderPotionShop();
+        renderMap();
+        refreshHubUI();
+      }
+    });
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
 document.getElementById("builderBtn").addEventListener("click", function () {
   renderShop();
+  renderPotionShop();
   document.getElementById("shopOverlay").classList.add("show");
 });
 document.getElementById("shopCloseBtn").addEventListener("click", function () {
   document.getElementById("shopOverlay").classList.remove("show");
 });
 
+// ---------- map ----------
+function renderMap(){
+  var grid = document.getElementById("biomeGrid");
+  grid.innerHTML = "";
+  BIOME_ORDER.forEach(function (id) {
+    var b = BIOMES[id];
+    var locked = b.requiresPotion && (save.potions.waterbreath || 0) <= 0;
+    var tile = document.createElement("button");
+    tile.className = "biomeTile" + (locked ? " locked" : "") + (id === "ocean" ? " ocean-tile" : "");
+    tile.style.background = b.bg;
+    tile.dataset.biome = id;
+    var lockLine = locked ? '<div class="block">🔒 Need a Potion of Water Breathing</div>' : "";
+    tile.innerHTML = '<div class="bicon">' + b.emoji + '</div><div class="bname">' + b.name + '</div>' + lockLine;
+    tile.addEventListener("click", function () { enterBiome(id); });
+    grid.appendChild(tile);
+  });
+}
+document.getElementById("openMapBtn").addEventListener("click", function () {
+  renderMap();
+  showScreen("screen-map");
+});
+document.getElementById("mapHomeBtn").addEventListener("click", function () {
+  showScreen("screen-hub");
+  refreshHubUI();
+});
+function enterBiome(biomeId){
+  var b = BIOMES[biomeId];
+  if (b.requiresPotion){
+    if ((save.potions.waterbreath || 0) <= 0){
+      showMapToast("You need a Potion of Water Breathing from the Builder!");
+      return;
+    }
+    save.potions.waterbreath -= 1;
+    persistSave(save);
+  }
+  startBiomeRun(biomeId);
+}
+function showMapToast(msg){
+  var existing = document.getElementById("mapToast");
+  if (existing) existing.remove();
+  var toastEl = document.createElement("div");
+  toastEl.id = "mapToast";
+  toastEl.className = "sub";
+  toastEl.style.color = "#fff";
+  toastEl.style.fontWeight = "bold";
+  toastEl.textContent = msg;
+  document.getElementById("screen-map").appendChild(toastEl);
+  setTimeout(function () { if (toastEl.parentNode) toastEl.remove(); }, 2200);
+}
+
 // ---------- dungeon game state ----------
 var dCanvas = document.getElementById("dungeonCanvas");
 var dCtx = dCanvas.getContext("2d");
-var ARENA_W = 320, ARENA_H = 400, MARGIN = 26;
+var ARENA_W = 400, ARENA_H = 500, MARGIN = 30;
 
 var run = null; // active dungeon run state, null when not in a dungeon
 var rafId = null;
 
-function newRun(){
+function newRun(biomeId){
   return {
+    biome: biomeId,
     player: { x: ARENA_W / 2, y: ARENA_H / 2, hp: PLAYER_MAX_HP, maxHp: PLAYER_MAX_HP, facing: "down", moving: false, animT: 0, invulnUntil: 0, invulnActive: false, attackCooldownUntil: 0, attackAnimT: null },
     monsters: [],
     arrows: [],
     drops: [],
     wave: 0,
+    bossSpawned: false,
     waveEmeraldsThisRun: 0,
     heartsThisRun: 0,
     lastTs: null,
@@ -487,24 +659,75 @@ function newRun(){
   };
 }
 
+// Any point pinned to one of the 4 arena edges — used for both regular wave
+// spawns and boss minion summons.
+function randomEdgePosition(){
+  var edge = Math.floor(Math.random() * 4);
+  if (edge === 0) return { x: MARGIN, y: MARGIN + Math.random() * (ARENA_H - MARGIN * 2) };
+  if (edge === 1) return { x: ARENA_W - MARGIN, y: MARGIN + Math.random() * (ARENA_H - MARGIN * 2) };
+  if (edge === 2) return { x: MARGIN + Math.random() * (ARENA_W - MARGIN * 2), y: MARGIN };
+  return { x: MARGIN + Math.random() * (ARENA_W - MARGIN * 2), y: ARENA_H - MARGIN };
+}
+
+function makeMonster(r, type){
+  var def = MONSTER_TYPES[type];
+  var pos = randomEdgePosition();
+  return {
+    id: r.nextId++, type: type, x: pos.x, y: pos.y, hp: def.hp, maxHp: def.hp,
+    canSplit: def.splits, fuseStartedAt: null, lastShotAt: 0, jitterX: 0, jitterY: 0,
+  };
+}
+
 function spawnWave(r, waveNum){
-  var types = pickWaveMonsters(waveNum);
-  types.forEach(function (type, i) {
-    var def = MONSTER_TYPES[type];
-    var edge = Math.floor(Math.random() * 4);
-    var x, y;
-    if (edge === 0) { x = MARGIN; y = MARGIN + Math.random() * (ARENA_H - MARGIN * 2); }
-    else if (edge === 1) { x = ARENA_W - MARGIN; y = MARGIN + Math.random() * (ARENA_H - MARGIN * 2); }
-    else if (edge === 2) { x = MARGIN + Math.random() * (ARENA_W - MARGIN * 2); y = MARGIN; }
-    else { x = MARGIN + Math.random() * (ARENA_W - MARGIN * 2); y = ARENA_H - MARGIN; }
-    r.monsters.push({
-      id: r.nextId++, type: type, x: x, y: y, hp: def.hp, maxHp: def.hp,
-      canSplit: def.splits, fuseStartedAt: null, lastShotAt: 0, jitterX: 0, jitterY: 0,
-    });
-  });
+  var biome = BIOMES[r.biome];
+  var types = pickWaveMonsters(waveNum, biome.monsterPool);
+  types.forEach(function (type) { r.monsters.push(makeMonster(r, type)); });
   r.wave = waveNum;
   document.getElementById("waveLabel").textContent = "Wave " + waveNum + "/" + TOTAL_WAVES;
   flashWaveBanner("Wave " + waveNum + "!");
+}
+
+function spawnBoss(r){
+  var biome = BIOMES[r.biome];
+  var def = BOSSES[biome.boss];
+  var boss = {
+    id: r.nextId++, type: biome.boss, isBoss: true, x: ARENA_W / 2, y: MARGIN + 24,
+    hp: def.hp, maxHp: def.hp, canSplit: false, fuseStartedAt: null, lastShotAt: 0,
+    jitterX: 0, jitterY: 0, lastSummonAt: performance.now(), summonsUsed: 0,
+  };
+  r.monsters.push(boss);
+  r.bossSpawned = true;
+  document.getElementById("waveLabel").textContent = "Boss: " + def.name;
+  flashWaveBanner("⚠️ " + def.emoji + " " + def.name + "!");
+  showBossHpBar(true);
+}
+
+function maybeBossSummon(boss, ts){
+  var def = BOSSES[boss.type];
+  if (!def || !def.summons || !def.summons.length) return;
+  if (boss.summonsUsed >= MAX_BOSS_SUMMONS_TOTAL) return;
+  if (ts - boss.lastSummonAt < def.summonCooldown) return;
+  if (run.monsters.length >= MAX_LIVE_MONSTERS) return;
+  boss.lastSummonAt = ts;
+  var count = Math.min(def.summonCount, MAX_BOSS_SUMMONS_TOTAL - boss.summonsUsed);
+  for (var i = 0; i < count; i++){
+    var type = def.summons[Math.floor(Math.random() * def.summons.length)];
+    run.monsters.push(makeMonster(run, type));
+    boss.summonsUsed++;
+  }
+  flashWaveBanner(def.emoji + " " + def.name + " summons help!");
+}
+
+function showBossHpBar(show){
+  document.getElementById("bossHpBarWrap").style.display = show ? "block" : "none";
+}
+function updateBossHpBar(){
+  var boss = run.monsters.find(function (m) { return m.isBoss; });
+  if (!boss){ showBossHpBar(false); return; }
+  showBossHpBar(true);
+  var def = BOSSES[boss.type];
+  document.getElementById("bossHpLabel").textContent = def.name + " " + Math.max(0, boss.hp) + "/" + boss.maxHp;
+  document.getElementById("bossHpBarFill").style.width = Math.max(0, boss.hp / boss.maxHp * 100) + "%";
 }
 
 function flashWaveBanner(text){
@@ -514,9 +737,11 @@ function flashWaveBanner(text){
   setTimeout(function () { el.classList.remove("show"); }, 1100);
 }
 
-function startDungeon(){
-  run = newRun();
+function startBiomeRun(biomeId){
+  run = newRun(biomeId);
   showScreen("screen-dungeon");
+  document.getElementById("breathBadge").style.display = biomeId === "ocean" ? "inline-block" : "none";
+  showBossHpBar(false);
   spawnWave(run, 1);
   renderHearts();
   document.getElementById("emeraldHud").textContent = "💎 " + save.emeralds;
@@ -608,12 +833,19 @@ function killMonster(m){
 
 function checkWaveClear(){
   if (run.monsters.length > 0) return;
-  if (run.wave >= TOTAL_WAVES){
+  if (run.bossSpawned){
     endRun(true);
-  } else {
+    return;
+  }
+  if (run.wave < TOTAL_WAVES){
     setTimeout(function () {
       if (!run || run.ended) return;
       spawnWave(run, run.wave + 1);
+    }, 900);
+  } else {
+    setTimeout(function () {
+      if (!run || run.ended) return;
+      spawnBoss(run);
     }, 900);
   }
 }
@@ -634,24 +866,28 @@ function endRun(victory){
   if (!run || run.ended) return;
   run.ended = true;
   if (rafId) cancelAnimationFrame(rafId);
-  document.getElementById("resultTitle").textContent = victory ? "🏆 Dungeon Complete!" : "😵 Knocked Out!";
+  showBossHpBar(false);
+  var biome = BIOMES[run.biome];
+  var bossDef = BOSSES[biome.boss];
+  document.getElementById("resultTitle").textContent = victory ? "🏆 " + bossDef.name + " Defeated!" : "😵 Knocked Out!";
   document.getElementById("resultLine1").textContent = "💎 Emeralds collected: " + run.waveEmeraldsThisRun;
   document.getElementById("resultLine2").textContent = victory
-    ? "Great job clearing all " + TOTAL_WAVES + " waves!"
+    ? "You cleared the " + biome.name + "!"
     : "No worries — you keep everything you collected. Try again!";
   document.getElementById("resultOverlay").classList.add("show");
 }
 document.getElementById("resultBackBtn").addEventListener("click", function () {
   document.getElementById("resultOverlay").classList.remove("show");
   run = null;
-  showScreen("screen-hub");
-  refreshHubUI();
+  renderMap();
+  showScreen("screen-map");
 });
 document.getElementById("leaveDungeonBtn").addEventListener("click", function () {
   if (rafId) cancelAnimationFrame(rafId);
   run = null;
-  showScreen("screen-hub");
-  refreshHubUI();
+  showBossHpBar(false);
+  renderMap();
+  showScreen("screen-map");
 });
 
 // ---------- game loop ----------
@@ -665,6 +901,7 @@ function gameLoop(ts){
   updateMonsters(dt, ts);
   updateArrows(dt);
   updateDrops();
+  updateBossHpBar();
   draw();
 
   rafId = requestAnimationFrame(gameLoop);
@@ -696,7 +933,7 @@ function updatePlayer(dt, ts){
 
 function updateMonsters(dt, ts){
   run.monsters.forEach(function (m) {
-    var def = MONSTER_TYPES[m.type];
+    var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
     var dx = run.player.x - m.x, dy = run.player.y - m.y;
     var dist = Math.sqrt(dx * dx + dy * dy) || 1;
 
@@ -732,6 +969,7 @@ function updateMonsters(dt, ts){
         applyDamageToPlayer(run.player, def.dmg, ts);
       }
     }
+    if (m.isBoss) maybeBossSummon(m, ts);
   });
   renderHearts();
   if (run.player.hp <= 0) endRun(false);
@@ -781,10 +1019,11 @@ function updateDrops(){
 
 // ---------- rendering ----------
 function draw(){
+  var biomeBg = (run && BIOMES[run.biome] && BIOMES[run.biome].bg) || "#2a2040";
   dCtx.clearRect(0, 0, ARENA_W, ARENA_H);
-  dCtx.fillStyle = "#2a2040";
+  dCtx.fillStyle = biomeBg;
   dCtx.fillRect(0, 0, ARENA_W, ARENA_H);
-  dCtx.fillStyle = "#3d3358";
+  dCtx.fillStyle = "rgba(255,255,255,0.06)";
   for (var gx = 0; gx < ARENA_W; gx += 40){
     for (var gy = 0; gy < ARENA_H; gy += 40){
       if (((gx / 40) + (gy / 40)) % 2 === 0) dCtx.fillRect(gx, gy, 40, 40);
@@ -832,9 +1071,6 @@ function draw(){
 
   drawPlayer(dCtx, run.player);
 }
-
-// ---------- nav wiring ----------
-document.getElementById("enterDungeonBtn").addEventListener("click", startDungeon);
 </script>
 </body>
 </html>
