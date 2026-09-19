@@ -139,6 +139,15 @@
   }
   #attackBtn:active, #attackBtn.pressed{ transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,0.25); }
 
+  .controls2{ display:flex; justify-content:center; gap:14px; max-width:400px; margin:10px auto 0; }
+  #powerBtn, #bombBtn{
+    border-radius:16px; border:3px solid #fff; padding:10px 16px; font-size:1.1rem; font-weight:bold;
+    cursor:pointer; box-shadow:0 4px 0 rgba(0,0,0,0.2); background:#8a5cff; color:#fff;
+  }
+  #bombBtn{ background:#ff8a3f; }
+  #powerBtn:active, #bombBtn:active{ transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,0.2); }
+  #powerBtn:disabled, #bombBtn:disabled{ opacity:0.4; cursor:default; }
+
   .resultCard{
     max-width:320px; background:rgba(255,255,255,0.95); border:4px solid #fff; border-radius:20px;
     padding:20px 18px; color:#2a2040;
@@ -161,7 +170,9 @@
         <canvas id="builderCanvas" width="90" height="110"></canvas>
         <div class="builderLabel">🧔 Tap the Builder to trade!</div>
       </button>
-      <div class="equippedRow">Equipped: <span id="equippedWeaponLabel">Wooden Sword 🗡️</span></div>
+      <div class="equippedRow">Weapon: <span id="equippedWeaponLabel">Wooden Sword 🗡️</span></div>
+      <div class="equippedRow">Armor: <span id="equippedArmorLabel">No Armor 👕</span></div>
+      <div class="equippedRow">Power: <span id="equippedPowerLabel">None yet</span></div>
     </div>
     <div class="row">
       <button class="bigbtn primary" id="openMapBtn">🗺️ Explore the Map</button>
@@ -181,6 +192,10 @@
     <h2>🧔 The Builder's Trade</h2>
     <div class="emeraldPill">💎 <span id="shopEmeraldCount">0</span> Emeralds</div>
     <div class="shopList" id="shopList"></div>
+    <h2 style="font-size:1.1rem;">🛡️ Armor</h2>
+    <div class="shopList" id="armorList"></div>
+    <h2 style="font-size:1.1rem;">✨ Superpowers</h2>
+    <div class="shopList" id="powerList"></div>
     <h2 style="font-size:1.1rem;">🧪 Potions</h2>
     <div class="shopList" id="potionList"></div>
     <button class="bigbtn secondary" id="shopCloseBtn">✖ Done Trading</button>
@@ -222,6 +237,10 @@
       </div>
       <button id="attackBtn">⚔️</button>
     </div>
+    <div class="controls2">
+      <button id="powerBtn" style="display:none;">✨</button>
+      <button id="bombBtn" style="display:none;">🧨 0</button>
+    </div>
   </div>
 
   <footer>Made for Ben 🎮</footer>
@@ -236,14 +255,32 @@
 // =====================================================================
 
 // ---------- weapons ----------
+// Costs lowered across the board so new gear comes faster.
 var WEAPONS = {
   wood:  { id:"wood",  name:"Wooden Sword", emoji:"🗡️", cost:0,  dmg:2, range:48, cooldown:380, ranged:false, color:"#c8965a" },
-  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:8,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a" },
-  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:18, dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea" },
-  bow:   { id:"bow",   name:"Golden Bow",   emoji:"🏹", cost:24, dmg:2, range:230, cooldown:500, ranged:true,  color:"#ffd23f" },
-  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:40, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff" },
+  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:4,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a" },
+  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:9,  dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea" },
+  bow:   { id:"bow",   name:"Golden Bow",   emoji:"🏹", cost:12, dmg:2, range:230, cooldown:500, ranged:true,  color:"#ffd23f" },
+  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:18, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff" },
 };
 var WEAPON_ORDER = ["wood", "stone", "iron", "bow", "axe"];
+
+// ---------- armor (equipped like weapons: adds defense + sometimes bonus hp) ----------
+var ARMOR = {
+  none:    { id:"none",    name:"No Armor",       emoji:"👕", cost:0,  defense:0, hpBonus:0 },
+  leather: { id:"leather", name:"Leather Armor",  emoji:"🥋", cost:6,  defense:1, hpBonus:0 },
+  iron:    { id:"iron",    name:"Iron Armor",     emoji:"🛡️", cost:14, defense:2, hpBonus:2 },
+  diamond: { id:"diamond", name:"Diamond Armor",  emoji:"💠", cost:26, defense:3, hpBonus:4 },
+};
+var ARMOR_ORDER = ["leather", "iron", "diamond"]; // "none" is the free default, not shown as buyable
+
+// ---------- superpowers (equipped like weapons; used in-run via the Power button) ----------
+var POWERS = {
+  dash:     { id:"dash",     name:"Speed Dash",      emoji:"💨", cost:10, cooldown:6000 },
+  fireball: { id:"fireball", name:"Fireball Blast",  emoji:"🔥", cost:20, cooldown:7000, dmg:6 },
+  shield:   { id:"shield",   name:"Guardian Shield", emoji:"🛡️✨", cost:16, cooldown:9000, durationMs:3000 },
+};
+var POWER_ORDER = ["dash", "fireball", "shield"];
 
 // ---------- potions (stackable consumables, not equipped like weapons) ----------
 var POTIONS = {
@@ -266,19 +303,31 @@ var MONSTER_TYPES = {
   embermite: { name:"Embermite",      emoji:"🔥", hp:4, speed:48,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#ff8a4a" },
   jellyfin:  { name:"Jellyfin",       emoji:"🪼", hp:3, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#c9a0ff" },
   eelbite:   { name:"Eelbite",        emoji:"🐍", hp:4, speed:50,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#3fb0a0" },
+  frogling:  { name:"Frogling",       emoji:"🐸", hp:4, speed:44,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5ac96a" },
+  bat:       { name:"Cave Bat",       emoji:"🦇", hp:3, speed:56,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#6a5a7a" },
+  windwisp:  { name:"Wind Wisp",      emoji:"🌀", hp:3, speed:54,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfe8ff" },
+  gemsprite: { name:"Gem Sprite",     emoji:"💎", hp:7, speed:22,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#7fdfff" },
+  wraith:    { name:"Shadow Wraith",  emoji:"🫥", hp:5, speed:46,  dmg:2, ranged:false, erratic:false, fuse:false, splits:false, color:"#4a3a6a" },
 };
-var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "slime", "ghost", "sandling", "icesprite", "embermite", "jellyfin", "eelbite"];
+var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "slime", "ghost", "sandling", "icesprite", "embermite", "jellyfin", "eelbite", "frogling", "bat", "windwisp", "gemsprite", "wraith"];
 
 // ---------- bosses (one per biome, each summons its own minions) ----------
+// Hp/dmg/summon-cadence generally escalate across BIOME_ORDER — later biomes
+// are meant to be noticeably harder fights, capped by MAX_BOSS_SUMMONS_TOTAL.
 var BOSSES = {
-  forestBoss:  { name:"Elder Treant", emoji:"🌳", hp:40, speed:22, dmg:2, summons:["zombie", "slime"],     summonCount:2, summonCooldown:4000, color:"#2f6b2f" },
-  desertBoss:  { name:"Sand Pharaoh", emoji:"🏺", hp:44, speed:24, dmg:2, summons:["skeleton", "sandling"], summonCount:2, summonCooldown:4000, color:"#c9a04a" },
-  frostBoss:   { name:"Frost Queen",  emoji:"👑", hp:42, speed:26, dmg:2, summons:["ghost", "icesprite"],   summonCount:2, summonCooldown:4000, color:"#8fd6ff" },
-  volcanoBoss: { name:"Magma Titan",  emoji:"👹", hp:50, speed:20, dmg:3, summons:["creeper", "embermite"], summonCount:2, summonCooldown:3800, color:"#ff6b3f" },
-  oceanBoss:   { name:"Abyss Kraken", emoji:"🐙", hp:46, speed:24, dmg:2, summons:["jellyfin", "eelbite"],  summonCount:2, summonCooldown:4000, color:"#2f7ba0" },
+  forestBoss:  { name:"Elder Treant",   emoji:"🌳",  hp:60,  speed:24, dmg:3, summons:["zombie", "slime"],       summonCount:2, summonCooldown:3200, color:"#2f6b2f" },
+  desertBoss:  { name:"Sand Pharaoh",   emoji:"🏺",  hp:66,  speed:26, dmg:3, summons:["skeleton", "sandling"],  summonCount:2, summonCooldown:3200, color:"#c9a04a" },
+  frostBoss:   { name:"Frost Queen",    emoji:"👑",  hp:64,  speed:28, dmg:3, summons:["ghost", "icesprite"],    summonCount:2, summonCooldown:3200, color:"#8fd6ff" },
+  volcanoBoss: { name:"Magma Titan",    emoji:"👹",  hp:76,  speed:22, dmg:4, summons:["creeper", "embermite"],  summonCount:3, summonCooldown:3000, color:"#ff6b3f" },
+  oceanBoss:   { name:"Abyss Kraken",   emoji:"🐙",  hp:70,  speed:26, dmg:3, summons:["jellyfin", "eelbite"],   summonCount:2, summonCooldown:3200, color:"#2f7ba0" },
+  swampBoss:   { name:"Bog Witch",      emoji:"🧙",  hp:78,  speed:24, dmg:4, summons:["slime", "frogling"],     summonCount:3, summonCooldown:3000, color:"#4a6b3a" },
+  mineBoss:    { name:"Cave Golem",     emoji:"🗿",  hp:84,  speed:22, dmg:4, summons:["bat", "zombie"],         summonCount:3, summonCooldown:2900, color:"#6a6a6a" },
+  skyBoss:     { name:"Storm Roc",      emoji:"🦅",  hp:88,  speed:30, dmg:4, summons:["windwisp", "ghost"],     summonCount:3, summonCooldown:2900, color:"#a9c9e6" },
+  crystalBoss: { name:"Crystal Colossus", emoji:"🔮", hp:94, speed:22, dmg:4, summons:["gemsprite", "icesprite"],summonCount:3, summonCooldown:2800, color:"#8f6fff" },
+  shadowBoss:  { name:"Shadow King",    emoji:"👤",  hp:110, speed:26, dmg:5, summons:["wraith", "skeleton"],    summonCount:3, summonCooldown:2600, color:"#2a2040" },
 };
-var MAX_LIVE_MONSTERS = 7; // includes the boss itself — keeps summon-spam manageable
-var MAX_BOSS_SUMMONS_TOTAL = 6; // per boss fight
+var MAX_LIVE_MONSTERS = 9; // includes the boss itself — keeps summon-spam manageable
+var MAX_BOSS_SUMMONS_TOTAL = 9; // per boss fight
 
 // ---------- biomes (the "map") ----------
 var BIOMES = {
@@ -287,8 +336,13 @@ var BIOMES = {
   frost:   { name:"Frozen Peaks",      emoji:"❄️", monsterPool:["ghost", "icesprite", "skeleton"],   boss:"frostBoss",   bg:"#274a5c", requiresPotion:false },
   volcano: { name:"Molten Crater",     emoji:"🌋", monsterPool:["creeper", "zombie", "embermite"],   boss:"volcanoBoss", bg:"#4a1f1f", requiresPotion:false },
   ocean:   { name:"Sunken Reef",       emoji:"🌊", monsterPool:["jellyfin", "eelbite"],              boss:"oceanBoss",   bg:"#0f2a3a", requiresPotion:true },
+  swamp:   { name:"Murky Swamp",       emoji:"🌿", monsterPool:["spider", "slime", "frogling"],      boss:"swampBoss",   bg:"#2a3a1f", requiresPotion:false },
+  mine:    { name:"Deep Mine",         emoji:"⛏️", monsterPool:["zombie", "skeleton", "bat"],        boss:"mineBoss",    bg:"#2a2a2a", requiresPotion:false },
+  sky:     { name:"Sky Islands",       emoji:"☁️", monsterPool:["ghost", "icesprite", "windwisp"],   boss:"skyBoss",     bg:"#3a5a7a", requiresPotion:false },
+  crystal: { name:"Crystal Cavern",    emoji:"🔮", monsterPool:["gemsprite", "icesprite", "spider"], boss:"crystalBoss", bg:"#2a1f4a", requiresPotion:false },
+  shadow:  { name:"Shadow Realm",      emoji:"🌌", monsterPool:["wraith", "skeleton", "creeper"],    boss:"shadowBoss",  bg:"#150f24", requiresPotion:false },
 };
-var BIOME_ORDER = ["forest", "desert", "frost", "volcano", "ocean"];
+var BIOME_ORDER = ["forest", "desert", "frost", "volcano", "ocean", "swamp", "mine", "sky", "crystal", "shadow"];
 
 var TOTAL_WAVES = 3; // regular waves per biome, before the boss wave
 var WAVE_SIZES = [3, 4, 5];
@@ -302,7 +356,13 @@ var CREEPER_BLAST_RADIUS = 50;
 // ---------- save state (persisted) ----------
 var SAVE_KEY = "dungeoncrawl_save_v1";
 function defaultSave(){
-  return { emeralds: 0, ownedWeapons: ["wood"], equippedWeapon: "wood", potions: { waterbreath: 0 } };
+  return {
+    emeralds: 0,
+    ownedWeapons: ["wood"], equippedWeapon: "wood",
+    ownedArmor: ["none"], equippedArmor: "none",
+    ownedPowers: [], equippedPower: "none",
+    potions: { waterbreath: 0 },
+  };
 }
 function loadSave(){
   try {
@@ -310,8 +370,12 @@ function loadSave(){
     if (!raw) return defaultSave();
     var parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.ownedWeapons)) return defaultSave();
-    // older saves (before potions existed) won't have this field — backfill it
+    // older saves (from before these fields existed) won't have them — backfill
     if (!parsed.potions || typeof parsed.potions !== "object") parsed.potions = { waterbreath: 0 };
+    if (!Array.isArray(parsed.ownedArmor)) parsed.ownedArmor = ["none"];
+    if (!parsed.equippedArmor) parsed.equippedArmor = "none";
+    if (!Array.isArray(parsed.ownedPowers)) parsed.ownedPowers = [];
+    if (!parsed.equippedPower) parsed.equippedPower = "none";
     return parsed;
   } catch (e) { return defaultSave(); }
 }
@@ -338,9 +402,31 @@ function heartsDisplay(hp, maxHp){
 function rollDrop(rng){
   rng = rng || Math.random;
   var r = rng();
-  if (r < 0.55) return "emerald";
-  if (r < 0.75) return "heart";
+  if (r < 0.62) return "emerald";
+  if (r < 0.80) return "heart";
   return null;
+}
+
+// A Boom Creeper defeated in combat (not one that self-detonated) has a
+// decent chance to leave behind a throwable bomb.
+function rollBombDrop(rng){
+  rng = rng || Math.random;
+  return rng() < 0.5;
+}
+
+// up/down/left/right -> a unit vector, used by thrown bombs and Speed Dash.
+function facingVector(facing){
+  if (facing === "up") return { x: 0, y: -1 };
+  if (facing === "left") return { x: -1, y: 0 };
+  if (facing === "right") return { x: 1, y: 0 };
+  return { x: 0, y: 1 }; // "down" and any unknown value
+}
+
+// Armor reduces incoming damage but never below 1, so gear always matters
+// without ever making the player fully immune to contact damage.
+function armorAdjustedDamage(save, dmg){
+  var armor = ARMOR[save.equippedArmor] || ARMOR.none;
+  return Math.max(1, dmg - armor.defense);
 }
 
 function waveSize(waveNum){
@@ -381,6 +467,46 @@ function buyWeapon(save, weaponId){
 function equipWeapon(save, weaponId){
   if (save.ownedWeapons.indexOf(weaponId) === -1) return false;
   save.equippedWeapon = weaponId;
+  return true;
+}
+
+function canBuyArmor(save, armorId){
+  var a = ARMOR[armorId];
+  if (!a) return false;
+  if (save.ownedArmor.indexOf(armorId) !== -1) return false;
+  return save.emeralds >= a.cost;
+}
+function buyArmor(save, armorId){
+  if (!canBuyArmor(save, armorId)) return false;
+  var a = ARMOR[armorId];
+  save.emeralds -= a.cost;
+  save.ownedArmor.push(armorId);
+  save.equippedArmor = armorId;
+  return true;
+}
+function equipArmor(save, armorId){
+  if (armorId !== "none" && save.ownedArmor.indexOf(armorId) === -1) return false;
+  save.equippedArmor = armorId;
+  return true;
+}
+
+function canBuyPower(save, powerId){
+  var p = POWERS[powerId];
+  if (!p) return false;
+  if (save.ownedPowers.indexOf(powerId) !== -1) return false;
+  return save.emeralds >= p.cost;
+}
+function buyPower(save, powerId){
+  if (!canBuyPower(save, powerId)) return false;
+  var p = POWERS[powerId];
+  save.emeralds -= p.cost;
+  save.ownedPowers.push(powerId);
+  save.equippedPower = powerId;
+  return true;
+}
+function equipPower(save, powerId){
+  if (save.ownedPowers.indexOf(powerId) === -1) return false;
+  save.equippedPower = powerId;
   return true;
 }
 
@@ -498,6 +624,10 @@ function refreshHubUI(){
   document.getElementById("hubEmeraldCount").textContent = save.emeralds;
   var w = WEAPONS[save.equippedWeapon] || WEAPONS.wood;
   document.getElementById("equippedWeaponLabel").textContent = w.name + " " + w.emoji;
+  var a = ARMOR[save.equippedArmor] || ARMOR.none;
+  document.getElementById("equippedArmorLabel").textContent = a.name + " " + a.emoji;
+  var pw = POWERS[save.equippedPower];
+  document.getElementById("equippedPowerLabel").textContent = pw ? (pw.name + " " + pw.emoji) : "None yet";
   drawBuilder();
 }
 refreshHubUI();
@@ -548,6 +678,83 @@ function renderShop(){
     list.appendChild(row);
   });
 }
+function renderArmorShop(){
+  var list = document.getElementById("armorList");
+  list.innerHTML = "";
+  ARMOR_ORDER.forEach(function (id) {
+    var a = ARMOR[id];
+    var owned = save.ownedArmor.indexOf(id) !== -1;
+    var row = document.createElement("div");
+    row.className = "shopItem";
+    var statsText = "🛡️" + a.defense + " defense" + (a.hpBonus ? " · +" + a.hpBonus + " HP" : "");
+    row.innerHTML =
+      '<div class="icon">' + a.emoji + '</div>' +
+      '<div class="info"><div class="wname">' + a.name + '</div><div class="wstats">' + statsText + '</div></div>';
+    var btn = document.createElement("button");
+    if (owned){
+      btn.className = "equipBtn" + (save.equippedArmor === id ? " equipped" : "");
+      btn.textContent = save.equippedArmor === id ? "Equipped" : "Equip";
+      btn.disabled = save.equippedArmor === id;
+      btn.addEventListener("click", function () {
+        equipArmor(save, id);
+        persistSave(save);
+        renderArmorShop();
+        refreshHubUI();
+      });
+    } else {
+      btn.className = "buyBtn";
+      btn.textContent = "💎" + a.cost;
+      btn.disabled = !canBuyArmor(save, id);
+      btn.addEventListener("click", function () {
+        if (buyArmor(save, id)){
+          persistSave(save);
+          renderArmorShop();
+          refreshHubUI();
+        }
+      });
+    }
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+function renderPowerShop(){
+  var list = document.getElementById("powerList");
+  list.innerHTML = "";
+  POWER_ORDER.forEach(function (id) {
+    var p = POWERS[id];
+    var owned = save.ownedPowers.indexOf(id) !== -1;
+    var row = document.createElement("div");
+    row.className = "shopItem";
+    row.innerHTML =
+      '<div class="icon">' + p.emoji + '</div>' +
+      '<div class="info"><div class="wname">' + p.name + '</div><div class="wstats">Special ability</div></div>';
+    var btn = document.createElement("button");
+    if (owned){
+      btn.className = "equipBtn" + (save.equippedPower === id ? " equipped" : "");
+      btn.textContent = save.equippedPower === id ? "Equipped" : "Equip";
+      btn.disabled = save.equippedPower === id;
+      btn.addEventListener("click", function () {
+        equipPower(save, id);
+        persistSave(save);
+        renderPowerShop();
+        refreshHubUI();
+      });
+    } else {
+      btn.className = "buyBtn";
+      btn.textContent = "💎" + p.cost;
+      btn.disabled = !canBuyPower(save, id);
+      btn.addEventListener("click", function () {
+        if (buyPower(save, id)){
+          persistSave(save);
+          renderPowerShop();
+          refreshHubUI();
+        }
+      });
+    }
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
 function renderPotionShop(){
   var list = document.getElementById("potionList");
   list.innerHTML = "";
@@ -577,6 +784,8 @@ function renderPotionShop(){
 }
 document.getElementById("builderBtn").addEventListener("click", function () {
   renderShop();
+  renderArmorShop();
+  renderPowerShop();
   renderPotionShop();
   document.getElementById("shopOverlay").classList.add("show");
 });
@@ -642,13 +851,23 @@ var ARENA_W = 400, ARENA_H = 500, MARGIN = 30;
 var run = null; // active dungeon run state, null when not in a dungeon
 var rafId = null;
 
+// Effective max HP for a run = the base plus whatever the equipped armor grants.
+function maxHpFor(save){
+  var armor = ARMOR[save.equippedArmor] || ARMOR.none;
+  return PLAYER_MAX_HP + armor.hpBonus;
+}
+
 function newRun(biomeId){
+  var maxHp = maxHpFor(save);
   return {
     biome: biomeId,
-    player: { x: ARENA_W / 2, y: ARENA_H / 2, hp: PLAYER_MAX_HP, maxHp: PLAYER_MAX_HP, facing: "down", moving: false, animT: 0, invulnUntil: 0, invulnActive: false, attackCooldownUntil: 0, attackAnimT: null },
+    player: { x: ARENA_W / 2, y: ARENA_H / 2, hp: maxHp, maxHp: maxHp, facing: "down", moving: false, animT: 0, invulnUntil: 0, invulnActive: false, attackCooldownUntil: 0, attackAnimT: null, powerCooldownUntil: 0 },
     monsters: [],
     arrows: [],
     drops: [],
+    thrownBombs: [],
+    bombExplosions: [],
+    bombs: 0,
     wave: 0,
     bossSpawned: false,
     waveEmeraldsThisRun: 0,
@@ -745,9 +964,18 @@ function startBiomeRun(biomeId){
   spawnWave(run, 1);
   renderHearts();
   document.getElementById("emeraldHud").textContent = "💎 " + save.emeralds;
+  var powerBtn = document.getElementById("powerBtn");
+  powerBtn.style.display = (save.equippedPower && POWERS[save.equippedPower]) ? "inline-block" : "none";
+  if (POWERS[save.equippedPower]) powerBtn.textContent = POWERS[save.equippedPower].emoji;
+  updateBombButton();
   run.lastTs = null;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(gameLoop);
+}
+function updateBombButton(){
+  var btn = document.getElementById("bombBtn");
+  btn.style.display = run && run.bombs > 0 ? "inline-block" : "none";
+  btn.textContent = "🧨 " + (run ? run.bombs : 0);
 }
 
 function renderHearts(){
@@ -773,6 +1001,8 @@ window.addEventListener("keydown", function (e) {
   var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down", a:"left", d:"right" };
   if (map[e.key]) heldDirs[map[e.key]] = true;
   if (e.key === " ") performAttack();
+  if (e.key === "e" || e.key === "E") usePower();
+  if (e.key === "q" || e.key === "Q") throwBomb();
 });
 window.addEventListener("keyup", function (e) {
   var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down", a:"left", d:"right" };
@@ -784,6 +1014,8 @@ document.getElementById("attackBtn").addEventListener("pointerdown", function (e
   performAttack();
 });
 document.getElementById("attackBtn").addEventListener("pointerup", function () { this.classList.remove("pressed"); });
+document.getElementById("powerBtn").addEventListener("pointerdown", function (e) { e.preventDefault(); usePower(); });
+document.getElementById("bombBtn").addEventListener("pointerdown", function (e) { e.preventDefault(); throwBomb(); });
 
 function performAttack(){
   if (!run || run.ended) return;
@@ -816,7 +1048,9 @@ function damageMonster(m, dmg){
   if (m.hp <= 0) killMonster(m);
 }
 
-function killMonster(m){
+// killedBySelf is true only when a Boom Creeper detonates itself — a creeper
+// defeated in actual combat instead has a chance to leave a throwable bomb.
+function killMonster(m, killedBySelf){
   var idx = run.monsters.indexOf(m);
   if (idx !== -1) run.monsters.splice(idx, 1);
   if (m.canSplit){
@@ -828,6 +1062,9 @@ function killMonster(m){
   }
   var drop = rollDrop();
   if (drop) run.drops.push({ id: run.nextId++, type: drop, x: m.x, y: m.y });
+  if (m.type === "creeper" && !killedBySelf && rollBombDrop()){
+    run.drops.push({ id: run.nextId++, type: "bomb", x: m.x, y: m.y });
+  }
   checkWaveClear();
 }
 
@@ -850,6 +1087,7 @@ function checkWaveClear(){
   }
 }
 
+var MAX_BOMBS_HELD = 3;
 function collectDrop(drop){
   if (drop.type === "emerald"){
     save.emeralds += 1;
@@ -857,6 +1095,9 @@ function collectDrop(drop){
   } else if (drop.type === "heart"){
     run.player.hp = Math.min(run.player.maxHp, run.player.hp + 1);
     run.heartsThisRun += 1;
+  } else if (drop.type === "bomb"){
+    if (run.bombs < MAX_BOMBS_HELD) run.bombs += 1;
+    updateBombButton();
   }
   persistSave(save);
   document.getElementById("emeraldHud").textContent = "💎 " + save.emeralds;
@@ -900,6 +1141,8 @@ function gameLoop(ts){
   updatePlayer(dt, ts);
   updateMonsters(dt, ts);
   updateArrows(dt);
+  updateBombs(dt);
+  updateBombExplosions(dt);
   updateDrops();
   updateBossHpBar();
   draw();
@@ -942,8 +1185,8 @@ function updateMonsters(dt, ts){
         if (m.fuseStartedAt == null) m.fuseStartedAt = ts;
         else if (ts - m.fuseStartedAt >= CREEPER_FUSE_MS){
           var stillClose = dist <= CREEPER_BLAST_RADIUS;
-          if (stillClose) applyDamageToPlayer(run.player, def.dmg, ts);
-          killMonster(m);
+          if (stillClose) applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
+          killMonster(m, true);
           return;
         }
       } else {
@@ -966,7 +1209,7 @@ function updateMonsters(dt, ts){
       }
       moveToward(m, dx + m.jitterX, dy + m.jitterY, Math.sqrt(Math.pow(dx + m.jitterX, 2) + Math.pow(dy + m.jitterY, 2)) || 1, def.speed, dt);
       if (dist < 16){
-        applyDamageToPlayer(run.player, def.dmg, ts);
+        applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
       }
     }
     if (m.isBoss) maybeBossSummon(m, ts);
@@ -990,7 +1233,7 @@ function updateArrows(dt){
     if (a.hostile){
       var dx = a.x - run.player.x, dy = a.y - run.player.y;
       if (Math.sqrt(dx * dx + dy * dy) < 14){
-        applyDamageToPlayer(run.player, a.dmg, ts);
+        applyDamageToPlayer(run.player, armorAdjustedDamage(save, a.dmg), ts);
         return false;
       }
     } else {
@@ -1017,6 +1260,70 @@ function updateDrops(){
   });
 }
 
+// ---------- thrown bombs (from Boom Creeper pickups) ----------
+var BOMB_SPEED = 220, BOMB_MAX_TRAVEL = 280, BOMB_BLAST_RADIUS = 55, BOMB_DAMAGE = 8;
+function throwBomb(){
+  if (!run || run.ended) return;
+  if (!run.bombs || run.bombs <= 0) return;
+  run.bombs -= 1;
+  updateBombButton();
+  var dir = facingVector(run.player.facing);
+  run.thrownBombs.push({ x: run.player.x, y: run.player.y, vx: dir.x * BOMB_SPEED, vy: dir.y * BOMB_SPEED, travelled: 0 });
+}
+function explodeBomb(x, y){
+  var hits = monstersInRange(x, y, BOMB_BLAST_RADIUS, run.monsters);
+  hits.forEach(function (m) { damageMonster(m, BOMB_DAMAGE); });
+  run.bombExplosions.push({ x: x, y: y, t: 0 });
+}
+function updateBombs(dt){
+  if (!run) return;
+  run.thrownBombs = run.thrownBombs.filter(function (b) {
+    var prevX = b.x, prevY = b.y;
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    b.travelled += Math.sqrt(Math.pow(b.x - prevX, 2) + Math.pow(b.y - prevY, 2));
+    var hitSomething = run.monsters.some(function (m) {
+      var dx = b.x - m.x, dy = b.y - m.y;
+      return Math.sqrt(dx * dx + dy * dy) < 16;
+    });
+    var outOfBounds = b.x < 0 || b.x > ARENA_W || b.y < 0 || b.y > ARENA_H;
+    if (hitSomething || b.travelled >= BOMB_MAX_TRAVEL || outOfBounds){
+      explodeBomb(Math.max(0, Math.min(ARENA_W, b.x)), Math.max(0, Math.min(ARENA_H, b.y)));
+      return false;
+    }
+    return true;
+  });
+}
+function updateBombExplosions(dt){
+  if (!run) return;
+  run.bombExplosions = run.bombExplosions.filter(function (e) {
+    e.t += dt * 1000;
+    return e.t < 350;
+  });
+}
+
+// ---------- superpowers ----------
+function usePower(){
+  if (!run || run.ended) return;
+  var powerId = save.equippedPower;
+  var def = POWERS[powerId];
+  if (!def) return;
+  var nowMs = performance.now();
+  if (nowMs < run.player.powerCooldownUntil) return;
+  run.player.powerCooldownUntil = nowMs + def.cooldown;
+
+  if (powerId === "dash"){
+    var dir = facingVector(run.player.facing);
+    run.player.x = Math.max(MARGIN, Math.min(ARENA_W - MARGIN, run.player.x + dir.x * 90));
+    run.player.y = Math.max(MARGIN, Math.min(ARENA_H - MARGIN, run.player.y + dir.y * 90));
+    run.player.invulnUntil = nowMs + 500;
+  } else if (powerId === "shield"){
+    run.player.invulnUntil = nowMs + def.durationMs;
+  } else if (powerId === "fireball"){
+    var dir2 = facingVector(run.player.facing);
+    run.arrows.push({ x: run.player.x, y: run.player.y, vx: dir2.x * 260, vy: dir2.y * 260, dmg: def.dmg, hostile: false, big: true });
+  }
+}
+
 // ---------- rendering ----------
 function draw(){
   var biomeBg = (run && BIOMES[run.biome] && BIOMES[run.biome].bg) || "#2a2040";
@@ -1033,28 +1340,43 @@ function draw(){
   dCtx.lineWidth = MARGIN * 2;
   dCtx.strokeRect(0, 0, ARENA_W, ARENA_H);
 
+  var DROP_EMOJI = { emerald: "💎", heart: "❤️", bomb: "🧨" };
   run.drops.forEach(function (d) {
     dCtx.font = "18px sans-serif";
     dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
-    dCtx.fillText(d.type === "emerald" ? "💎" : "❤️", d.x, d.y);
+    dCtx.fillText(DROP_EMOJI[d.type] || "❔", d.x, d.y);
   });
 
   run.monsters.forEach(function (m) {
-    var def = MONSTER_TYPES[m.type];
+    var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
     var fusing = m.fuseStartedAt != null;
+    var radius = m.isBoss ? 22 : 15;
     dCtx.beginPath();
     dCtx.fillStyle = fusing && Math.floor(performance.now() / 100) % 2 === 0 ? "#ffffff" : def.color;
-    dCtx.arc(m.x, m.y, 15, 0, Math.PI * 2);
+    dCtx.arc(m.x, m.y, radius, 0, Math.PI * 2);
     dCtx.fill();
-    dCtx.font = "18px sans-serif";
+    dCtx.font = (m.isBoss ? "26px" : "18px") + " sans-serif";
     dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
     dCtx.fillText(def.emoji, m.x, m.y);
   });
 
   run.arrows.forEach(function (a) {
-    dCtx.fillStyle = a.hostile ? "#ffb0b0" : "#fff5c0";
+    dCtx.fillStyle = a.hostile ? "#ffb0b0" : (a.big ? "#ff8a3f" : "#fff5c0");
     dCtx.beginPath();
-    dCtx.arc(a.x, a.y, 4, 0, Math.PI * 2);
+    dCtx.arc(a.x, a.y, a.big ? 8 : 4, 0, Math.PI * 2);
+    dCtx.fill();
+  });
+
+  run.thrownBombs.forEach(function (b) {
+    dCtx.font = "16px sans-serif";
+    dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
+    dCtx.fillText("🧨", b.x, b.y);
+  });
+  run.bombExplosions.forEach(function (e) {
+    var p = e.t / 350;
+    dCtx.beginPath();
+    dCtx.fillStyle = "rgba(255,150,60," + (1 - p) + ")";
+    dCtx.arc(e.x, e.y, BOMB_BLAST_RADIUS * p, 0, Math.PI * 2);
     dCtx.fill();
   });
 
