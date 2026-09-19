@@ -221,7 +221,7 @@
         <div id="heartsRow"></div>
         <div id="emeraldHud">💎 0</div>
       </div>
-      <div id="waveLabel">Wave 1/3</div>
+      <div id="waveLabel"></div>
       <div id="bossHpBarWrap" style="display:none;">
         <div id="bossHpLabel"></div>
         <div id="bossHpBarTrack"><div id="bossHpBarFill"></div></div>
@@ -275,10 +275,11 @@ var ARMOR = {
 var ARMOR_ORDER = ["leather", "iron", "diamond"]; // "none" is the free default, not shown as buyable
 
 // ---------- superpowers (equipped like weapons; used in-run via the Power button) ----------
+// cooldown:0 means usable anytime — tap it again the instant you want to.
 var POWERS = {
-  dash:     { id:"dash",     name:"Speed Dash",      emoji:"💨", cost:10, cooldown:6000 },
-  fireball: { id:"fireball", name:"Fireball Blast",  emoji:"🔥", cost:20, cooldown:7000, dmg:6 },
-  shield:   { id:"shield",   name:"Guardian Shield", emoji:"🛡️✨", cost:16, cooldown:9000, durationMs:3000 },
+  dash:     { id:"dash",     name:"Speed Dash",      emoji:"💨", cost:10, cooldown:0 },
+  fireball: { id:"fireball", name:"Fireball Blast",  emoji:"🔥", cost:20, cooldown:0, dmg:6 },
+  shield:   { id:"shield",   name:"Guardian Shield", emoji:"🛡️✨", cost:16, cooldown:0, durationMs:3000 },
 };
 var POWER_ORDER = ["dash", "fireball", "shield"];
 
@@ -344,8 +345,17 @@ var BIOMES = {
 };
 var BIOME_ORDER = ["forest", "desert", "frost", "volcano", "ocean", "swamp", "mine", "sky", "crystal", "shadow"];
 
-var TOTAL_WAVES = 3; // regular waves per biome, before the boss wave
-var WAVE_SIZES = [3, 4, 5];
+// A biome is now one big explorable world, not a small fixed arena. ARENA_W/H
+// (below, near the canvas) stays the on-screen viewport size; WORLD_W/H is
+// the much bigger space the player can actually walk around in — the camera
+// follows the player and only the world within VISION_RADIUS is ever drawn,
+// so most of it stays hidden ("you don't know what's ahead") until explored.
+var WORLD_W = 1400, WORLD_H = 1400;
+var VISION_RADIUS = 170;
+var AGGRO_RADIUS = 140; // how close the player has to get before a sleeping camp wakes up
+var CAMP_COUNT = 5, CAMP_SIZE_MIN = 2, CAMP_SIZE_MAX = 3;
+var HAZARD_COUNT = 3, HAZARD_RADIUS_MIN = 60, HAZARD_RADIUS_MAX = 90;
+var MIN_DIST_FROM_START = 260; // camps/hazards never generate right on top of the player
 var PLAYER_MAX_HP = 20; // 10 hearts
 var PLAYER_SPEED = 130; // px/sec
 var INVULN_MS = 800;
@@ -429,25 +439,66 @@ function armorAdjustedDamage(save, dmg){
   return Math.max(1, dmg - armor.defense);
 }
 
-function waveSize(waveNum){
-  var idx = Math.max(0, Math.min(WAVE_SIZES.length - 1, waveNum - 1));
-  return WAVE_SIZES[idx];
+function dist(x1, y1, x2, y2){
+  var dx = x1 - x2, dy = y1 - y2;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
-// pool defaults to every monster type; pass a biome's monsterPool to keep
-// waves themed to that biome. (pool, rng) can also be called as just (rng)
-// for backward compatibility with earlier callers/tests.
-function pickWaveMonsters(waveNum, pool, rng){
-  if (typeof pool === "function") { rng = pool; pool = null; }
-  pool = pool && pool.length ? pool : MONSTER_ORDER;
+// A random point at a fixed radius/angle around (x,y) — used to place boss
+// minion summons near the ongoing fight, wherever in the world it's happening.
+function positionNear(x, y, radius, rng){
   rng = rng || Math.random;
-  var n = waveSize(waveNum);
-  var picks = [];
-  for (var i = 0; i < n; i++){
-    var idx = Math.floor(rng() * pool.length);
-    picks.push(pool[idx]);
+  var angle = rng() * Math.PI * 2;
+  return { x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius };
+}
+
+// Scatters a handful of sleeping monster camps around the world, each a
+// small cluster drawn from the biome's own monster pool, none too close to
+// where the player starts. Camps stay idle (harmless) until approached —
+// see the "active" flag handled in updateMonsters.
+function generateCamps(r, biomeId, worldW, worldH, playerStart, rng){
+  rng = rng || Math.random;
+  var biome = BIOMES[biomeId];
+  var camps = [];
+  for (var i = 0; i < CAMP_COUNT; i++){
+    var cx, cy, tries = 0;
+    do {
+      cx = 100 + rng() * (worldW - 200);
+      cy = 100 + rng() * (worldH - 200);
+      tries++;
+    } while (dist(cx, cy, playerStart.x, playerStart.y) < MIN_DIST_FROM_START && tries < 20);
+    var count = CAMP_SIZE_MIN + Math.floor(rng() * (CAMP_SIZE_MAX - CAMP_SIZE_MIN + 1));
+    for (var j = 0; j < count; j++){
+      var type = biome.monsterPool[Math.floor(rng() * biome.monsterPool.length)];
+      var def = MONSTER_TYPES[type];
+      var mx = cx + (rng() - 0.5) * 50;
+      var my = cy + (rng() - 0.5) * 50;
+      camps.push({
+        id: r.nextId++, type: type, x: mx, y: my, hp: def.hp, maxHp: def.hp,
+        canSplit: def.splits, fuseStartedAt: null, lastShotAt: 0, jitterX: 0, jitterY: 0,
+        active: false,
+      });
+    }
   }
-  return picks;
+  return camps;
+}
+
+// A few visible-but-deadly zones scattered around the world — stepping into
+// one ends the run immediately (the friendly, non-punishing way — see
+// endRun's "hazard" reason). Never generated right on top of the player.
+function generateHazards(worldW, worldH, playerStart, rng){
+  rng = rng || Math.random;
+  var hazards = [];
+  for (var i = 0; i < HAZARD_COUNT; i++){
+    var x, y, tries = 0;
+    do {
+      x = 100 + rng() * (worldW - 200);
+      y = 100 + rng() * (worldH - 200);
+      tries++;
+    } while (dist(x, y, playerStart.x, playerStart.y) < MIN_DIST_FROM_START && tries < 20);
+    hazards.push({ x: x, y: y, r: HAZARD_RADIUS_MIN + rng() * (HAZARD_RADIUS_MAX - HAZARD_RADIUS_MIN) });
+  }
+  return hazards;
 }
 
 function canBuyWeapon(save, weaponId){
@@ -859,66 +910,57 @@ function maxHpFor(save){
 
 function newRun(biomeId){
   var maxHp = maxHpFor(save);
-  return {
+  var start = { x: WORLD_W / 2, y: WORLD_H / 2 };
+  var r = {
     biome: biomeId,
-    player: { x: ARENA_W / 2, y: ARENA_H / 2, hp: maxHp, maxHp: maxHp, facing: "down", moving: false, animT: 0, invulnUntil: 0, invulnActive: false, attackCooldownUntil: 0, attackAnimT: null, powerCooldownUntil: 0 },
+    player: { x: start.x, y: start.y, hp: maxHp, maxHp: maxHp, facing: "down", moving: false, animT: 0, invulnUntil: 0, invulnActive: false, attackCooldownUntil: 0, attackAnimT: null, powerCooldownUntil: 0 },
+    camera: { x: start.x - ARENA_W / 2, y: start.y - ARENA_H / 2 },
     monsters: [],
+    hazards: [],
     arrows: [],
     drops: [],
     thrownBombs: [],
     bombExplosions: [],
     bombs: 0,
-    wave: 0,
-    bossSpawned: false,
+    bossSeen: false,
     waveEmeraldsThisRun: 0,
     heartsThisRun: 0,
     lastTs: null,
     nextId: 1,
     ended: false,
   };
+  r.hazards = generateHazards(WORLD_W, WORLD_H, start);
+  r.monsters = generateCamps(r, biomeId, WORLD_W, WORLD_H, start);
+  spawnRoamingBoss(r, start);
+  return r;
 }
 
-// Any point pinned to one of the 4 arena edges — used for both regular wave
-// spawns and boss minion summons.
-function randomEdgePosition(){
-  var edge = Math.floor(Math.random() * 4);
-  if (edge === 0) return { x: MARGIN, y: MARGIN + Math.random() * (ARENA_H - MARGIN * 2) };
-  if (edge === 1) return { x: ARENA_W - MARGIN, y: MARGIN + Math.random() * (ARENA_H - MARGIN * 2) };
-  if (edge === 2) return { x: MARGIN + Math.random() * (ARENA_W - MARGIN * 2), y: MARGIN };
-  return { x: MARGIN + Math.random() * (ARENA_W - MARGIN * 2), y: ARENA_H - MARGIN };
-}
-
-function makeMonster(r, type){
+function makeMonster(r, type, pos){
   var def = MONSTER_TYPES[type];
-  var pos = randomEdgePosition();
   return {
     id: r.nextId++, type: type, x: pos.x, y: pos.y, hp: def.hp, maxHp: def.hp,
     canSplit: def.splits, fuseStartedAt: null, lastShotAt: 0, jitterX: 0, jitterY: 0,
+    active: true,
   };
 }
 
-function spawnWave(r, waveNum){
-  var biome = BIOMES[r.biome];
-  var types = pickWaveMonsters(waveNum, biome.monsterPool);
-  types.forEach(function (type) { r.monsters.push(makeMonster(r, type)); });
-  r.wave = waveNum;
-  document.getElementById("waveLabel").textContent = "Wave " + waveNum + "/" + TOTAL_WAVES;
-  flashWaveBanner("Wave " + waveNum + "!");
-}
-
-function spawnBoss(r){
+// The boss spawns somewhere far from the player and, from that moment on,
+// actively hunts them across the ENTIRE world (never idle like camp
+// monsters) — see the isBoss check in updateMonsters.
+function spawnRoamingBoss(r, playerStart){
   var biome = BIOMES[r.biome];
   var def = BOSSES[biome.boss];
-  var boss = {
-    id: r.nextId++, type: biome.boss, isBoss: true, x: ARENA_W / 2, y: MARGIN + 24,
+  var x, y, tries = 0;
+  do {
+    x = 100 + Math.random() * (WORLD_W - 200);
+    y = 100 + Math.random() * (WORLD_H - 200);
+    tries++;
+  } while (dist(x, y, playerStart.x, playerStart.y) < MIN_DIST_FROM_START * 1.5 && tries < 20);
+  r.monsters.push({
+    id: r.nextId++, type: biome.boss, isBoss: true, x: x, y: y,
     hp: def.hp, maxHp: def.hp, canSplit: false, fuseStartedAt: null, lastShotAt: 0,
     jitterX: 0, jitterY: 0, lastSummonAt: performance.now(), summonsUsed: 0,
-  };
-  r.monsters.push(boss);
-  r.bossSpawned = true;
-  document.getElementById("waveLabel").textContent = "Boss: " + def.name;
-  flashWaveBanner("⚠️ " + def.emoji + " " + def.name + "!");
-  showBossHpBar(true);
+  });
 }
 
 function maybeBossSummon(boss, ts){
@@ -931,7 +973,7 @@ function maybeBossSummon(boss, ts){
   var count = Math.min(def.summonCount, MAX_BOSS_SUMMONS_TOTAL - boss.summonsUsed);
   for (var i = 0; i < count; i++){
     var type = def.summons[Math.floor(Math.random() * def.summons.length)];
-    run.monsters.push(makeMonster(run, type));
+    run.monsters.push(makeMonster(run, type, positionNear(boss.x, boss.y, 90)));
     boss.summonsUsed++;
   }
   flashWaveBanner(def.emoji + " " + def.name + " summons help!");
@@ -942,7 +984,7 @@ function showBossHpBar(show){
 }
 function updateBossHpBar(){
   var boss = run.monsters.find(function (m) { return m.isBoss; });
-  if (!boss){ showBossHpBar(false); return; }
+  if (!boss || !run.bossSeen){ showBossHpBar(false); return; }
   showBossHpBar(true);
   var def = BOSSES[boss.type];
   document.getElementById("bossHpLabel").textContent = def.name + " " + Math.max(0, boss.hp) + "/" + boss.maxHp;
@@ -960,8 +1002,9 @@ function startBiomeRun(biomeId){
   run = newRun(biomeId);
   showScreen("screen-dungeon");
   document.getElementById("breathBadge").style.display = biomeId === "ocean" ? "inline-block" : "none";
+  document.getElementById("waveLabel").textContent = BIOMES[biomeId].emoji + " " + BIOMES[biomeId].name;
   showBossHpBar(false);
-  spawnWave(run, 1);
+  flashWaveBanner("👀 Explore carefully...");
   renderHearts();
   document.getElementById("emeraldHud").textContent = "💎 " + save.emeralds;
   var powerBtn = document.getElementById("powerBtn");
@@ -1057,6 +1100,7 @@ function killMonster(m, killedBySelf){
     splitSlimeChildren(m).forEach(function (child) {
       child.id = run.nextId++;
       child.fuseStartedAt = null; child.lastShotAt = 0; child.jitterX = 0; child.jitterY = 0;
+      child.active = true;
       run.monsters.push(child);
     });
   }
@@ -1065,26 +1109,7 @@ function killMonster(m, killedBySelf){
   if (m.type === "creeper" && !killedBySelf && rollBombDrop()){
     run.drops.push({ id: run.nextId++, type: "bomb", x: m.x, y: m.y });
   }
-  checkWaveClear();
-}
-
-function checkWaveClear(){
-  if (run.monsters.length > 0) return;
-  if (run.bossSpawned){
-    endRun(true);
-    return;
-  }
-  if (run.wave < TOTAL_WAVES){
-    setTimeout(function () {
-      if (!run || run.ended) return;
-      spawnWave(run, run.wave + 1);
-    }, 900);
-  } else {
-    setTimeout(function () {
-      if (!run || run.ended) return;
-      spawnBoss(run);
-    }, 900);
-  }
+  if (m.isBoss) endRun(true);
 }
 
 var MAX_BOMBS_HELD = 3;
@@ -1103,18 +1128,24 @@ function collectDrop(drop){
   document.getElementById("emeraldHud").textContent = "💎 " + save.emeralds;
 }
 
-function endRun(victory){
+function endRun(victory, reason){
   if (!run || run.ended) return;
   run.ended = true;
   if (rafId) cancelAnimationFrame(rafId);
   showBossHpBar(false);
   var biome = BIOMES[run.biome];
   var bossDef = BOSSES[biome.boss];
-  document.getElementById("resultTitle").textContent = victory ? "🏆 " + bossDef.name + " Defeated!" : "😵 Knocked Out!";
+  if (victory){
+    document.getElementById("resultTitle").textContent = "🏆 " + bossDef.name + " Defeated!";
+    document.getElementById("resultLine2").textContent = "You cleared the " + biome.name + "!";
+  } else if (reason === "hazard"){
+    document.getElementById("resultTitle").textContent = "☠️ You Didn't Survive!";
+    document.getElementById("resultLine2").textContent = "No worries — you keep everything you collected. Watch out for danger zones next time!";
+  } else {
+    document.getElementById("resultTitle").textContent = "😵 Knocked Out!";
+    document.getElementById("resultLine2").textContent = "No worries — you keep everything you collected. Try again!";
+  }
   document.getElementById("resultLine1").textContent = "💎 Emeralds collected: " + run.waveEmeraldsThisRun;
-  document.getElementById("resultLine2").textContent = victory
-    ? "You cleared the " + biome.name + "!"
-    : "No worries — you keep everything you collected. Try again!";
   document.getElementById("resultOverlay").classList.add("show");
 }
 document.getElementById("resultBackBtn").addEventListener("click", function () {
@@ -1139,6 +1170,9 @@ function gameLoop(ts){
   run.lastTs = ts;
 
   updatePlayer(dt, ts);
+  updateCamera();
+  updateHazards();
+  if (!run || run.ended) return; // a hazard may have just ended the run
   updateMonsters(dt, ts);
   updateArrows(dt);
   updateBombs(dt);
@@ -1163,8 +1197,8 @@ function updatePlayer(dt, ts){
     vx /= len; vy /= len;
     if (Math.abs(vx) > Math.abs(vy)) p.facing = vx < 0 ? "left" : "right";
     else p.facing = vy < 0 ? "up" : "down";
-    p.x = Math.max(MARGIN, Math.min(ARENA_W - MARGIN, p.x + vx * PLAYER_SPEED * dt));
-    p.y = Math.max(MARGIN, Math.min(ARENA_H - MARGIN, p.y + vy * PLAYER_SPEED * dt));
+    p.x = Math.max(MARGIN, Math.min(WORLD_W - MARGIN, p.x + vx * PLAYER_SPEED * dt));
+    p.y = Math.max(MARGIN, Math.min(WORLD_H - MARGIN, p.y + vy * PLAYER_SPEED * dt));
     p.animT += dt;
   }
   p.invulnActive = ts < p.invulnUntil;
@@ -1174,17 +1208,52 @@ function updatePlayer(dt, ts){
   }
 }
 
+// Follows the player, clamped so it never shows past the edge of the world.
+function updateCamera(){
+  if (!run) return;
+  run.camera.x = Math.max(0, Math.min(WORLD_W - ARENA_W, run.player.x - ARENA_W / 2));
+  run.camera.y = Math.max(0, Math.min(WORLD_H - ARENA_H, run.player.y - ARENA_H / 2));
+}
+
+// Stepping into a hazard zone ends the run immediately — visible-but-deadly,
+// not a cheap invisible trap, since hazards only render once revealed.
+function updateHazards(){
+  if (!run || run.ended) return;
+  for (var i = 0; i < run.hazards.length; i++){
+    var h = run.hazards[i];
+    if (dist(run.player.x, run.player.y, h.x, h.y) <= h.r){
+      endRun(false, "hazard");
+      return;
+    }
+  }
+}
+
 function updateMonsters(dt, ts){
   run.monsters.forEach(function (m) {
     var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
     var dx = run.player.x - m.x, dy = run.player.y - m.y;
-    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var distToPlayer = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    // Camp monsters sleep until the player gets close, then wake up for good.
+    // The boss is always active — it hunts the player across the whole world.
+    if (!m.isBoss && !m.active){
+      if (distToPlayer <= AGGRO_RADIUS){
+        m.active = true;
+        flashWaveBanner("⚔️ Enemies spotted!");
+      } else {
+        return;
+      }
+    }
+    if (m.isBoss && !run.bossSeen && distToPlayer <= VISION_RADIUS){
+      run.bossSeen = true;
+      flashWaveBanner("⚠️ " + BOSSES[m.type].name + " is hunting you!");
+    }
 
     if (def.fuse){
-      if (dist <= CREEPER_TRIGGER_RADIUS){
+      if (distToPlayer <= CREEPER_TRIGGER_RADIUS){
         if (m.fuseStartedAt == null) m.fuseStartedAt = ts;
         else if (ts - m.fuseStartedAt >= CREEPER_FUSE_MS){
-          var stillClose = dist <= CREEPER_BLAST_RADIUS;
+          var stillClose = distToPlayer <= CREEPER_BLAST_RADIUS;
           if (stillClose) applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
           killMonster(m, true);
           return;
@@ -1193,12 +1262,12 @@ function updateMonsters(dt, ts){
         m.fuseStartedAt = null;
       }
     } else if (def.ranged){
-      if (dist > def.shootRange * 0.7){
-        moveToward(m, dx, dy, dist, def.speed, dt);
+      if (distToPlayer > def.shootRange * 0.7){
+        moveToward(m, dx, dy, distToPlayer, def.speed, dt);
       }
-      if (dist <= def.shootRange && ts - m.lastShotAt > def.shootCooldown){
+      if (distToPlayer <= def.shootRange && ts - m.lastShotAt > def.shootCooldown){
         m.lastShotAt = ts;
-        run.arrows.push({ x: m.x, y: m.y, vx: (dx / dist) * 200, vy: (dy / dist) * 200, dmg: def.dmg, hostile: true });
+        run.arrows.push({ x: m.x, y: m.y, vx: (dx / distToPlayer) * 200, vy: (dy / distToPlayer) * 200, dmg: def.dmg, hostile: true });
       }
     } else {
       if (def.erratic){
@@ -1208,7 +1277,7 @@ function updateMonsters(dt, ts){
         m.jitterY = Math.max(-30, Math.min(30, m.jitterY));
       }
       moveToward(m, dx + m.jitterX, dy + m.jitterY, Math.sqrt(Math.pow(dx + m.jitterX, 2) + Math.pow(dy + m.jitterY, 2)) || 1, def.speed, dt);
-      if (dist < 16){
+      if (distToPlayer < 16){
         applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
       }
     }
@@ -1221,15 +1290,15 @@ function updateMonsters(dt, ts){
 function moveToward(m, dx, dy, dist, speed, dt){
   m.x += (dx / dist) * speed * dt;
   m.y += (dy / dist) * speed * dt;
-  m.x = Math.max(MARGIN, Math.min(ARENA_W - MARGIN, m.x));
-  m.y = Math.max(MARGIN, Math.min(ARENA_H - MARGIN, m.y));
+  m.x = Math.max(MARGIN, Math.min(WORLD_W - MARGIN, m.x));
+  m.y = Math.max(MARGIN, Math.min(WORLD_H - MARGIN, m.y));
 }
 
 function updateArrows(dt){
   var ts = performance.now();
   run.arrows = run.arrows.filter(function (a) {
     a.x += a.vx * dt; a.y += a.vy * dt;
-    if (a.x < 0 || a.x > ARENA_W || a.y < 0 || a.y > ARENA_H) return false;
+    if (a.x < 0 || a.x > WORLD_W || a.y < 0 || a.y > WORLD_H) return false;
     if (a.hostile){
       var dx = a.x - run.player.x, dy = a.y - run.player.y;
       if (Math.sqrt(dx * dx + dy * dy) < 14){
@@ -1285,9 +1354,9 @@ function updateBombs(dt){
       var dx = b.x - m.x, dy = b.y - m.y;
       return Math.sqrt(dx * dx + dy * dy) < 16;
     });
-    var outOfBounds = b.x < 0 || b.x > ARENA_W || b.y < 0 || b.y > ARENA_H;
+    var outOfBounds = b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H;
     if (hitSomething || b.travelled >= BOMB_MAX_TRAVEL || outOfBounds){
-      explodeBomb(Math.max(0, Math.min(ARENA_W, b.x)), Math.max(0, Math.min(ARENA_H, b.y)));
+      explodeBomb(Math.max(0, Math.min(WORLD_W, b.x)), Math.max(0, Math.min(WORLD_H, b.y)));
       return false;
     }
     return true;
@@ -1313,8 +1382,8 @@ function usePower(){
 
   if (powerId === "dash"){
     var dir = facingVector(run.player.facing);
-    run.player.x = Math.max(MARGIN, Math.min(ARENA_W - MARGIN, run.player.x + dir.x * 90));
-    run.player.y = Math.max(MARGIN, Math.min(ARENA_H - MARGIN, run.player.y + dir.y * 90));
+    run.player.x = Math.max(MARGIN, Math.min(WORLD_W - MARGIN, run.player.x + dir.x * 90));
+    run.player.y = Math.max(MARGIN, Math.min(WORLD_H - MARGIN, run.player.y + dir.y * 90));
     run.player.invulnUntil = nowMs + 500;
   } else if (powerId === "shield"){
     run.player.invulnUntil = nowMs + def.durationMs;
@@ -1325,32 +1394,46 @@ function usePower(){
 }
 
 // ---------- rendering ----------
-function draw(){
-  var biomeBg = (run && BIOMES[run.biome] && BIOMES[run.biome].bg) || "#2a2040";
-  dCtx.clearRect(0, 0, ARENA_W, ARENA_H);
-  dCtx.fillStyle = biomeBg;
-  dCtx.fillRect(0, 0, ARENA_W, ARENA_H);
-  dCtx.fillStyle = "rgba(255,255,255,0.06)";
-  for (var gx = 0; gx < ARENA_W; gx += 40){
-    for (var gy = 0; gy < ARENA_H; gy += 40){
-      if (((gx / 40) + (gy / 40)) % 2 === 0) dCtx.fillRect(gx, gy, 40, 40);
-    }
-  }
-  dCtx.strokeStyle = "#544a78";
-  dCtx.lineWidth = MARGIN * 2;
-  dCtx.strokeRect(0, 0, ARENA_W, ARENA_H);
+var DROP_EMOJI = { emerald: "💎", heart: "❤️", bomb: "🧨" };
 
-  var DROP_EMOJI = { emerald: "💎", heart: "❤️", bomb: "🧨" };
+function draw(){
+  var biomeBg = (run && BIOMES[run.biome] && BIOMES[run.biome].bg) || "#0a0a0a";
+  var px = run.player.x, py = run.player.y;
+
+  dCtx.fillStyle = "#000";
+  dCtx.fillRect(0, 0, ARENA_W, ARENA_H);
+
+  dCtx.save();
+  dCtx.translate(-run.camera.x, -run.camera.y);
+
+  dCtx.fillStyle = biomeBg;
+  dCtx.fillRect(run.camera.x, run.camera.y, ARENA_W, ARENA_H);
+
+  run.hazards.forEach(function (h) {
+    if (dist(h.x, h.y, px, py) > VISION_RADIUS + h.r) return;
+    var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220);
+    dCtx.beginPath();
+    dCtx.fillStyle = "rgba(255," + Math.floor(60 + pulse * 40) + ",30,0.55)";
+    dCtx.arc(h.x, h.y, h.r, 0, Math.PI * 2);
+    dCtx.fill();
+    dCtx.font = "20px sans-serif";
+    dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
+    dCtx.fillText("☠️", h.x, h.y);
+  });
+
   run.drops.forEach(function (d) {
+    if (dist(d.x, d.y, px, py) > VISION_RADIUS) return;
     dCtx.font = "18px sans-serif";
     dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
     dCtx.fillText(DROP_EMOJI[d.type] || "❔", d.x, d.y);
   });
 
   run.monsters.forEach(function (m) {
+    if (dist(m.x, m.y, px, py) > VISION_RADIUS) return;
     var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
     var fusing = m.fuseStartedAt != null;
     var radius = m.isBoss ? 22 : 15;
+    dCtx.globalAlpha = (!m.isBoss && !m.active) ? 0.5 : 1;
     dCtx.beginPath();
     dCtx.fillStyle = fusing && Math.floor(performance.now() / 100) % 2 === 0 ? "#ffffff" : def.color;
     dCtx.arc(m.x, m.y, radius, 0, Math.PI * 2);
@@ -1358,6 +1441,7 @@ function draw(){
     dCtx.font = (m.isBoss ? "26px" : "18px") + " sans-serif";
     dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
     dCtx.fillText(def.emoji, m.x, m.y);
+    dCtx.globalAlpha = 1;
   });
 
   run.arrows.forEach(function (a) {
@@ -1385,13 +1469,24 @@ function draw(){
     dCtx.strokeStyle = weapon.color;
     dCtx.lineWidth = 3;
     dCtx.beginPath();
-    dCtx.arc(run.player.x, run.player.y, weapon.range, 0, Math.PI * 2);
+    dCtx.arc(px, py, weapon.range, 0, Math.PI * 2);
     dCtx.globalAlpha = Math.max(0, 1 - run.player.attackAnimT / 180) * 0.5;
     dCtx.stroke();
     dCtx.globalAlpha = 1;
   }
 
   drawPlayer(dCtx, run.player);
+
+  dCtx.restore();
+
+  // fog of war — a soft circle of visibility around the player, everything
+  // else stays dark until explored ("you don't know what's ahead").
+  var screenPx = px - run.camera.x, screenPy = py - run.camera.y;
+  var fog = dCtx.createRadialGradient(screenPx, screenPy, VISION_RADIUS * 0.55, screenPx, screenPy, VISION_RADIUS);
+  fog.addColorStop(0, "rgba(0,0,0,0)");
+  fog.addColorStop(1, "rgba(0,0,0,0.96)");
+  dCtx.fillStyle = fog;
+  dCtx.fillRect(0, 0, ARENA_W, ARENA_H);
 }
 </script>
 </body>
