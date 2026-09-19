@@ -256,12 +256,16 @@
 
 // ---------- weapons ----------
 // Costs lowered across the board so new gear comes faster.
+// swingArc = how wide an arc the weapon swings through (bigger = heavier,
+// choppier feel — the axe swings much further than a sword). emojiSize =
+// how big the weapon renders in-hand. shockwaveChance = the odds any single
+// attack also fires a bonus AOE shockwave (see maybeShockwave).
 var WEAPONS = {
-  wood:  { id:"wood",  name:"Wooden Sword", emoji:"🗡️", cost:0,  dmg:2, range:48, cooldown:380, ranged:false, color:"#c8965a" },
-  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:4,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a" },
-  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:9,  dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea" },
-  bow:   { id:"bow",   name:"Golden Bow",   emoji:"🏹", cost:12, dmg:2, range:230, cooldown:500, ranged:true,  color:"#ffd23f" },
-  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:18, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff" },
+  wood:  { id:"wood",  name:"Wooden Sword", emoji:"🗡️", cost:0,  dmg:2, range:48, cooldown:380, ranged:false, color:"#c8965a", swingArc:1.3, emojiSize:15, shockwaveChance:0.10 },
+  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:4,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a", swingArc:1.3, emojiSize:16, shockwaveChance:0.14 },
+  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:9,  dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea", swingArc:1.35, emojiSize:16, shockwaveChance:0.18 },
+  bow:   { id:"bow",   name:"Golden Bow",   emoji:"🏹", cost:12, dmg:2, range:230, cooldown:500, ranged:true,  color:"#ffd23f", swingArc:0.35, emojiSize:18, shockwaveChance:0.16 },
+  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:18, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff", swingArc:2.0, emojiSize:21, shockwaveChance:0.25 },
 };
 var WEAPON_ORDER = ["wood", "stone", "iron", "bow", "axe"];
 
@@ -621,13 +625,19 @@ function drawBuilder(){
 }
 
 // ---------- Minecraft-ish blocky player sprite ----------
-function drawPlayer(c, p){
+// The equipped weapon is always visibly held in hand — at rest it sits at a
+// slight resting angle (so it reads as "held", not limp); mid-swing it
+// rotates through the weapon's own swingArc, so an axe visibly chops through
+// a much wider arc than a sword's quick slash, and a bow barely moves at all
+// (just a small recoil kick) since it's drawn/fired, not swung.
+function drawPlayer(c, p, weapon){
   var x = p.x, y = p.y;
   var facing = p.facing || "down";
   var flip = facing === "left";
   var walkOffset = p.moving ? Math.sin(p.animT * 8) * 4 : 0;
   var flashHidden = p.invulnUntil && p.invulnActive && Math.floor(p.animT * 10) % 2 === 0;
   if (flashHidden) return;
+  weapon = weapon || WEAPONS.wood;
 
   c.save();
   c.translate(x, y);
@@ -642,15 +652,22 @@ function drawPlayer(c, p){
   c.fillStyle = "#3fae6b";
   c.fillRect(-10, -8, 20, 20);
 
-  // arms (one swings on attack)
+  // weapon arm (swings on attack; always holding the weapon, even at rest)
+  var swingProgress = p.attackAnimT != null ? Math.max(0, 1 - p.attackAnimT / 180) : 0;
+  var restAngle = -0.25;
+  var angle = weapon.ranged
+    ? restAngle + swingProgress * 0.35   // a small recoil kick on release, not a swing
+    : restAngle - swingProgress * (weapon.swingArc || 1.4);
   c.fillStyle = "#e8b98a";
-  var swing = p.attackAnimT != null ? Math.max(0, 1 - p.attackAnimT / 180) : 0;
   c.save();
   c.translate(11, -6);
-  c.rotate(-swing * 1.4);
+  c.rotate(angle);
   c.fillRect(0, 0, 6, 14);
+  c.font = weapon.emojiSize + "px sans-serif";
+  c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText(weapon.emoji, 3, 19);
   c.restore();
-  c.fillRect(-17, -6, 6, 14);
+  c.fillRect(-17, -6, 6, 14); // off-hand, empty
 
   // head
   c.fillStyle = "#e8b98a";
@@ -921,6 +938,7 @@ function newRun(biomeId){
     drops: [],
     thrownBombs: [],
     bombExplosions: [],
+    shockwaves: [],
     bombs: 0,
     bossSeen: false,
     waveEmeraldsThisRun: 0,
@@ -1084,6 +1102,28 @@ function performAttack(){
     var hits = monstersInRange(run.player.x, run.player.y, weapon.range, run.monsters);
     hits.forEach(function (m) { damageMonster(m, weapon.dmg); });
   }
+
+  maybeShockwave(weapon);
+}
+
+// Any attack has a per-weapon chance to also unleash a bonus AOE shockwave —
+// a burst centered on the player, on top of whatever the attack itself hit.
+var SHOCKWAVE_RADIUS = 130;
+var SHOCKWAVE_DURATION_MS = 350;
+function maybeShockwave(weapon){
+  var chance = weapon.shockwaveChance != null ? weapon.shockwaveChance : 0.12;
+  if (Math.random() >= chance) return;
+  var hits = monstersInRange(run.player.x, run.player.y, SHOCKWAVE_RADIUS, run.monsters);
+  var dmg = Math.max(1, Math.ceil(weapon.dmg * 0.75));
+  hits.forEach(function (m) { damageMonster(m, dmg); });
+  run.shockwaves.push({ x: run.player.x, y: run.player.y, t: 0 });
+}
+function updateShockwaves(dt){
+  if (!run) return;
+  run.shockwaves = run.shockwaves.filter(function (sw) {
+    sw.t += dt * 1000;
+    return sw.t < SHOCKWAVE_DURATION_MS;
+  });
 }
 
 function damageMonster(m, dmg){
@@ -1177,6 +1217,7 @@ function gameLoop(ts){
   updateArrows(dt);
   updateBombs(dt);
   updateBombExplosions(dt);
+  updateShockwaves(dt);
   updateDrops();
   updateBossHpBar();
   draw();
@@ -1464,6 +1505,15 @@ function draw(){
     dCtx.fill();
   });
 
+  run.shockwaves.forEach(function (sw) {
+    var p = sw.t / SHOCKWAVE_DURATION_MS;
+    dCtx.beginPath();
+    dCtx.strokeStyle = "rgba(180,220,255," + (1 - p) + ")";
+    dCtx.lineWidth = 5 * (1 - p) + 1;
+    dCtx.arc(sw.x, sw.y, SHOCKWAVE_RADIUS * p, 0, Math.PI * 2);
+    dCtx.stroke();
+  });
+
   if (run.player.attackAnimT != null){
     var weapon = WEAPONS[save.equippedWeapon] || WEAPONS.wood;
     dCtx.strokeStyle = weapon.color;
@@ -1475,7 +1525,7 @@ function draw(){
     dCtx.globalAlpha = 1;
   }
 
-  drawPlayer(dCtx, run.player);
+  drawPlayer(dCtx, run.player, WEAPONS[save.equippedWeapon] || WEAPONS.wood);
 
   dCtx.restore();
 
