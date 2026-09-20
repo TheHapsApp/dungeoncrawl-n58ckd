@@ -259,13 +259,14 @@
 // swingArc = how wide an arc the weapon swings through (bigger = heavier,
 // choppier feel — the axe swings much further than a sword). emojiSize =
 // how big the weapon renders in-hand. shockwaveChance = the odds any single
-// attack also fires a bonus AOE shockwave (see maybeShockwave).
+// attack also fires a bonus AOE shockwave (see maybeShockwave) — every
+// sword and the axe always proc it (1); only the bow stays a real chance.
 var WEAPONS = {
-  wood:  { id:"wood",  name:"Wooden Sword", emoji:"🗡️", cost:0,  dmg:2, range:48, cooldown:380, ranged:false, color:"#c8965a", swingArc:1.3, emojiSize:15, shockwaveChance:0.10 },
-  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:4,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a", swingArc:1.3, emojiSize:16, shockwaveChance:0.14 },
-  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:9,  dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea", swingArc:1.35, emojiSize:16, shockwaveChance:0.18 },
+  wood:  { id:"wood",  name:"Wooden Sword", emoji:"🗡️", cost:0,  dmg:2, range:48, cooldown:380, ranged:false, color:"#c8965a", swingArc:1.3, emojiSize:15, shockwaveChance:1 },
+  stone: { id:"stone", name:"Stone Sword",  emoji:"⚔️", cost:4,  dmg:3, range:50, cooldown:360, ranged:false, color:"#9a9a9a", swingArc:1.3, emojiSize:16, shockwaveChance:1 },
+  iron:  { id:"iron",  name:"Iron Sword",   emoji:"🗡️", cost:9,  dmg:4, range:52, cooldown:340, ranged:false, color:"#dfe4ea", swingArc:1.35, emojiSize:16, shockwaveChance:1 },
   bow:   { id:"bow",   name:"Golden Bow",   emoji:"🏹", cost:12, dmg:2, range:230, cooldown:500, ranged:true,  color:"#ffd23f", swingArc:0.35, emojiSize:18, shockwaveChance:0.16 },
-  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:18, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff", swingArc:2.0, emojiSize:21, shockwaveChance:0.25 },
+  axe:   { id:"axe",   name:"Diamond Axe",  emoji:"🪓", cost:18, dmg:6, range:54, cooldown:540, ranged:false, color:"#6be3ff", swingArc:2.0, emojiSize:21, shockwaveChance:1 },
 };
 var WEAPON_ORDER = ["wood", "stone", "iron", "bow", "axe"];
 
@@ -1108,8 +1109,8 @@ function performAttack(){
 
 // Any attack has a per-weapon chance to also unleash a bonus AOE shockwave —
 // a burst centered on the player, on top of whatever the attack itself hit.
-var SHOCKWAVE_RADIUS = 130;
-var SHOCKWAVE_DURATION_MS = 350;
+var SHOCKWAVE_RADIUS = 220;
+var SHOCKWAVE_DURATION_MS = 450;
 function maybeShockwave(weapon){
   var chance = weapon.shockwaveChance != null ? weapon.shockwaveChance : 0.12;
   if (Math.random() >= chance) return;
