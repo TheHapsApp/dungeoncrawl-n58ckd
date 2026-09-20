@@ -254,6 +254,124 @@
 // Builder NPC in the hub for buying new weapons.
 // =====================================================================
 
+// ---------- sound effects (Web Audio, no audio files) ----------
+// A darker, blockier palette than the toddler apps' bright sine-wave
+// cheerfulness — square/triangle waves and short noise bursts, leaning on
+// minor/pentatonic intervals, aiming for a chunky "dungeon combat" feel.
+var audioCtx = null;
+function actx(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function sfxTone(freq, start, dur, type, gainMax){
+  var c = actx();
+  var osc = c.createOscillator();
+  var gain = c.createGain();
+  osc.type = type || "square";
+  osc.frequency.setValueAtTime(freq, c.currentTime + start);
+  gain.gain.setValueAtTime(0, c.currentTime + start);
+  gain.gain.linearRampToValueAtTime(gainMax || 0.15, c.currentTime + start + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + start + dur);
+  osc.connect(gain).connect(c.destination);
+  osc.start(c.currentTime + start);
+  osc.stop(c.currentTime + start + dur + 0.05);
+}
+function sfxSlide(fromFreq, toFreq, start, dur, type, gainMax){
+  var c = actx();
+  var osc = c.createOscillator();
+  var gain = c.createGain();
+  osc.type = type || "square";
+  osc.frequency.setValueAtTime(fromFreq, c.currentTime + start);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, toFreq), c.currentTime + start + dur);
+  gain.gain.setValueAtTime(0, c.currentTime + start);
+  gain.gain.linearRampToValueAtTime(gainMax || 0.14, c.currentTime + start + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + start + dur);
+  osc.connect(gain).connect(c.destination);
+  osc.start(c.currentTime + start);
+  osc.stop(c.currentTime + start + dur + 0.05);
+}
+// A short burst of real noise (not just a tone) for hits/explosions — much
+// punchier/more "impact"-feeling than an oscillator alone.
+function sfxNoise(start, dur, gainMax, lowpassFreq){
+  var c = actx();
+  var bufferSize = Math.max(1, Math.floor(c.sampleRate * dur));
+  var buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+  var data = buffer.getChannelData(0);
+  for (var i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  var src = c.createBufferSource();
+  src.buffer = buffer;
+  var gain = c.createGain();
+  gain.gain.setValueAtTime(gainMax || 0.18, c.currentTime + start);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + start + dur);
+  var node = gain;
+  if (lowpassFreq){
+    var filter = c.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = lowpassFreq;
+    src.connect(filter).connect(gain);
+  } else {
+    src.connect(gain);
+  }
+  gain.connect(c.destination);
+  src.start(c.currentTime + start);
+}
+
+function sfxSwing(ranged){
+  if (ranged) sfxSlide(700, 260, 0, 0.14, "triangle", 0.12);
+  else sfxSlide(320, 180, 0, 0.1, "square", 0.13);
+}
+function sfxHit(){
+  sfxNoise(0, 0.07, 0.16, 1400);
+  sfxTone(150, 0, 0.08, "square", 0.1);
+}
+function sfxMonsterDeath(){
+  sfxSlide(300, 80, 0, 0.28, "square", 0.14);
+}
+function sfxPlayerHurt(){
+  sfxTone(130, 0, 0.18, "sawtooth", 0.14);
+  sfxTone(90, 0.05, 0.18, "sawtooth", 0.1);
+}
+function sfxExplosion(){
+  sfxNoise(0, 0.35, 0.3, 900);
+  sfxSlide(180, 40, 0, 0.35, "square", 0.16);
+}
+function sfxShockwave(){
+  sfxSlide(220, 780, 0, 0.22, "triangle", 0.15);
+}
+function sfxPower(id){
+  if (id === "dash") sfxSlide(500, 1000, 0, 0.15, "triangle", 0.13);
+  else if (id === "shield") { sfxTone(500, 0, 0.15, "triangle", 0.12); sfxTone(700, 0.08, 0.2, "triangle", 0.12); sfxTone(900, 0.16, 0.25, "triangle", 0.12); }
+  else if (id === "fireball") { sfxNoise(0, 0.18, 0.14, 2200); sfxSlide(400, 900, 0, 0.2, "sawtooth", 0.12); }
+}
+function sfxBossSummon(){
+  sfxTone(110, 0, 0.3, "sawtooth", 0.14);
+  sfxTone(90, 0.1, 0.3, "sawtooth", 0.12);
+}
+function sfxBossSighted(){
+  sfxTone(160, 0, 0.18, "sawtooth", 0.15);
+  sfxTone(120, 0.15, 0.28, "sawtooth", 0.16);
+}
+function sfxEnemiesSpotted(){
+  sfxTone(500, 0, 0.08, "square", 0.11);
+  sfxTone(650, 0.09, 0.1, "square", 0.11);
+}
+function sfxPickup(){
+  sfxTone(700, 0, 0.06, "square", 0.09);
+  sfxTone(1000, 0.05, 0.09, "square", 0.09);
+}
+function sfxTeleport(){
+  sfxSlide(900, 200, 0, 0.16, "sawtooth", 0.12);
+  sfxSlide(200, 900, 0.1, 0.12, "sawtooth", 0.08);
+}
+function sfxVictory(){
+  sfxTone(392, 0, 0.18, "square", 0.14);
+  sfxTone(494, 0.14, 0.18, "square", 0.14);
+  sfxTone(587, 0.28, 0.35, "square", 0.16);
+}
+function sfxKnockout(){
+  sfxSlide(300, 100, 0, 0.4, "sawtooth", 0.13);
+}
+
 // ---------- weapons ----------
 // Costs lowered across the board so new gear comes faster.
 // swingArc = how wide an arc the weapon swings through (bigger = heavier,
@@ -297,25 +415,34 @@ var POTION_ORDER = ["waterbreath"];
 // ---------- monster roster ----------
 // zombie/skeleton/spider/creeper are the familiar Minecraft Dungeons cast,
 // each tweaked a little; slime and ghost are new additions Ben asked for.
+// archetype picks which drawMonsterSprite body shape a mob renders with
+// (see drawMonsterSprite) — creeper/enderman get their real, recognizable
+// Minecraft shapes; everything else shares a small set of body templates.
 var MONSTER_TYPES = {
-  zombie:    { name:"Grumble Zombie", emoji:"🧟", hp:6, speed:34,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#5b8a4a" },
-  skeleton:  { name:"Bony Archer",    emoji:"💀", hp:4, speed:26,  dmg:1, ranged:true,  erratic:false, fuse:false, splits:false, color:"#d8d0b0", shootRange:220, shootCooldown:1800 },
-  spider:    { name:"Web Spider",     emoji:"🕷️", hp:3, speed:52,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5a3d7a" },
-  creeper:   { name:"Boom Creeper",   emoji:"🧨", hp:4, speed:28,  dmg:2, ranged:false, erratic:false, fuse:true,  splits:false, color:"#5ad16a" },
-  slime:     { name:"Slime Blob",     emoji:"🟢", hp:4, speed:24,  dmg:1, ranged:false, erratic:false, fuse:false, splits:true,  color:"#3fd08a" },
-  ghost:     { name:"Ghost Puff",     emoji:"👻", hp:2, speed:36,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfefff" },
-  sandling:  { name:"Sandling",       emoji:"🏺", hp:5, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#d9b26a" },
-  icesprite: { name:"Ice Sprite",     emoji:"❄️", hp:3, speed:40,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#a9e6ff" },
-  embermite: { name:"Embermite",      emoji:"🔥", hp:4, speed:48,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#ff8a4a" },
-  jellyfin:  { name:"Jellyfin",       emoji:"🪼", hp:3, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#c9a0ff" },
-  eelbite:   { name:"Eelbite",        emoji:"🐍", hp:4, speed:50,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#3fb0a0" },
-  frogling:  { name:"Frogling",       emoji:"🐸", hp:4, speed:44,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5ac96a" },
-  bat:       { name:"Cave Bat",       emoji:"🦇", hp:3, speed:56,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#6a5a7a" },
-  windwisp:  { name:"Wind Wisp",      emoji:"🌀", hp:3, speed:54,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfe8ff" },
-  gemsprite: { name:"Gem Sprite",     emoji:"💎", hp:7, speed:22,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#7fdfff" },
-  wraith:    { name:"Shadow Wraith",  emoji:"🫥", hp:5, speed:46,  dmg:2, ranged:false, erratic:false, fuse:false, splits:false, color:"#4a3a6a" },
+  zombie:        { name:"Grumble Zombie", emoji:"🧟", hp:6, speed:34,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#5b8a4a", archetype:"humanoid" },
+  skeleton:      { name:"Bony Archer",    emoji:"💀", hp:4, speed:26,  dmg:1, ranged:true,  erratic:false, fuse:false, splits:false, color:"#d8d0b0", shootRange:220, shootCooldown:1800, archetype:"humanoid" },
+  spider:        { name:"Web Spider",     emoji:"🕷️", hp:3, speed:52,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5a3d7a", archetype:"spider" },
+  creeper:       { name:"Boom Creeper",   emoji:"🧨", hp:4, speed:28,  dmg:2, ranged:false, erratic:false, fuse:true,  splits:false, color:"#5ad16a", archetype:"creeper" },
+  // Charged Creeper: same real body, wrapped in a pulsing blue-white
+  // lightning glow (its actual MC look) — bigger trigger/blast radius+damage.
+  chargedcreeper:{ name:"Charged Creeper",emoji:"⚡",  hp:5, speed:28,  dmg:3, ranged:false, erratic:false, fuse:true,  splits:false, color:"#5ad16a", archetype:"creeper", charged:true, triggerRadius:46, blastRadius:90 },
+  // Enderman: tall/thin/black with purple eyes, teleports toward the player
+  // instead of just walking (see the def.teleports branch in updateMonsters).
+  enderman:      { name:"Enderman",       emoji:"🟪",  hp:7, speed:30,  dmg:2, ranged:false, erratic:false, fuse:false, splits:false, color:"#0a0a0a", archetype:"enderman", teleports:true, teleportCooldown:2500 },
+  slime:         { name:"Slime Blob",     emoji:"🟢", hp:4, speed:24,  dmg:1, ranged:false, erratic:false, fuse:false, splits:true,  color:"#3fd08a", archetype:"blob" },
+  ghost:         { name:"Ghost Puff",     emoji:"👻", hp:2, speed:36,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfefff", archetype:"floaty" },
+  sandling:      { name:"Sandling",       emoji:"🏺", hp:5, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#d9b26a", archetype:"blob" },
+  icesprite:     { name:"Ice Sprite",     emoji:"❄️", hp:3, speed:40,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#a9e6ff", archetype:"floaty" },
+  embermite:     { name:"Embermite",      emoji:"🔥", hp:4, speed:48,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#ff8a4a", archetype:"blob" },
+  jellyfin:      { name:"Jellyfin",       emoji:"🪼", hp:3, speed:30,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#c9a0ff", archetype:"blob" },
+  eelbite:       { name:"Eelbite",        emoji:"🐍", hp:4, speed:50,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#3fb0a0", archetype:"spider" },
+  frogling:      { name:"Frogling",       emoji:"🐸", hp:4, speed:44,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#5ac96a", archetype:"blob" },
+  bat:           { name:"Cave Bat",       emoji:"🦇", hp:3, speed:56,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#6a5a7a", archetype:"floaty" },
+  windwisp:      { name:"Wind Wisp",      emoji:"🌀", hp:3, speed:54,  dmg:1, ranged:false, erratic:true,  fuse:false, splits:false, color:"#cfe8ff", archetype:"floaty" },
+  gemsprite:     { name:"Gem Sprite",     emoji:"💎", hp:7, speed:22,  dmg:1, ranged:false, erratic:false, fuse:false, splits:false, color:"#7fdfff", archetype:"blob" },
+  wraith:        { name:"Shadow Wraith",  emoji:"🫥", hp:5, speed:46,  dmg:2, ranged:false, erratic:false, fuse:false, splits:false, color:"#4a3a6a", archetype:"humanoid" },
 };
-var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "slime", "ghost", "sandling", "icesprite", "embermite", "jellyfin", "eelbite", "frogling", "bat", "windwisp", "gemsprite", "wraith"];
+var MONSTER_ORDER = ["zombie", "skeleton", "spider", "creeper", "chargedcreeper", "enderman", "slime", "ghost", "sandling", "icesprite", "embermite", "jellyfin", "eelbite", "frogling", "bat", "windwisp", "gemsprite", "wraith"];
 
 // ---------- bosses (one per biome, each summons its own minions) ----------
 // Hp/dmg/summon-cadence generally escalate across BIOME_ORDER — later biomes
@@ -324,13 +451,13 @@ var BOSSES = {
   forestBoss:  { name:"Elder Treant",   emoji:"🌳",  hp:60,  speed:24, dmg:3, summons:["zombie", "slime"],       summonCount:2, summonCooldown:3200, color:"#2f6b2f" },
   desertBoss:  { name:"Sand Pharaoh",   emoji:"🏺",  hp:66,  speed:26, dmg:3, summons:["skeleton", "sandling"],  summonCount:2, summonCooldown:3200, color:"#c9a04a" },
   frostBoss:   { name:"Frost Queen",    emoji:"👑",  hp:64,  speed:28, dmg:3, summons:["ghost", "icesprite"],    summonCount:2, summonCooldown:3200, color:"#8fd6ff" },
-  volcanoBoss: { name:"Magma Titan",    emoji:"👹",  hp:76,  speed:22, dmg:4, summons:["creeper", "embermite"],  summonCount:3, summonCooldown:3000, color:"#ff6b3f" },
+  volcanoBoss: { name:"Magma Titan",    emoji:"👹",  hp:76,  speed:22, dmg:4, summons:["creeper", "chargedcreeper", "embermite"], summonCount:3, summonCooldown:3000, color:"#ff6b3f" },
   oceanBoss:   { name:"Abyss Kraken",   emoji:"🐙",  hp:70,  speed:26, dmg:3, summons:["jellyfin", "eelbite"],   summonCount:2, summonCooldown:3200, color:"#2f7ba0" },
   swampBoss:   { name:"Bog Witch",      emoji:"🧙",  hp:78,  speed:24, dmg:4, summons:["slime", "frogling"],     summonCount:3, summonCooldown:3000, color:"#4a6b3a" },
   mineBoss:    { name:"Cave Golem",     emoji:"🗿",  hp:84,  speed:22, dmg:4, summons:["bat", "zombie"],         summonCount:3, summonCooldown:2900, color:"#6a6a6a" },
   skyBoss:     { name:"Storm Roc",      emoji:"🦅",  hp:88,  speed:30, dmg:4, summons:["windwisp", "ghost"],     summonCount:3, summonCooldown:2900, color:"#a9c9e6" },
   crystalBoss: { name:"Crystal Colossus", emoji:"🔮", hp:94, speed:22, dmg:4, summons:["gemsprite", "icesprite"],summonCount:3, summonCooldown:2800, color:"#8f6fff" },
-  shadowBoss:  { name:"Shadow King",    emoji:"👤",  hp:110, speed:26, dmg:5, summons:["wraith", "skeleton"],    summonCount:3, summonCooldown:2600, color:"#2a2040" },
+  shadowBoss:  { name:"Shadow King",    emoji:"👤",  hp:110, speed:26, dmg:5, summons:["wraith", "skeleton", "enderman"], summonCount:3, summonCooldown:2600, color:"#2a2040" },
 };
 var MAX_LIVE_MONSTERS = 9; // includes the boss itself — keeps summon-spam manageable
 var MAX_BOSS_SUMMONS_TOTAL = 9; // per boss fight
@@ -340,13 +467,13 @@ var BIOMES = {
   forest:  { name:"Whispering Forest", emoji:"🌲", monsterPool:["zombie", "spider", "slime"],       boss:"forestBoss",  bg:"#1f3a1f", requiresPotion:false },
   desert:  { name:"Sunbaked Desert",   emoji:"🏜️", monsterPool:["skeleton", "creeper", "sandling"],  boss:"desertBoss",  bg:"#5a4326", requiresPotion:false },
   frost:   { name:"Frozen Peaks",      emoji:"❄️", monsterPool:["ghost", "icesprite", "skeleton"],   boss:"frostBoss",   bg:"#274a5c", requiresPotion:false },
-  volcano: { name:"Molten Crater",     emoji:"🌋", monsterPool:["creeper", "zombie", "embermite"],   boss:"volcanoBoss", bg:"#4a1f1f", requiresPotion:false },
+  volcano: { name:"Molten Crater",     emoji:"🌋", monsterPool:["creeper", "chargedcreeper", "zombie", "embermite"], boss:"volcanoBoss", bg:"#4a1f1f", requiresPotion:false },
   ocean:   { name:"Sunken Reef",       emoji:"🌊", monsterPool:["jellyfin", "eelbite"],              boss:"oceanBoss",   bg:"#0f2a3a", requiresPotion:true },
   swamp:   { name:"Murky Swamp",       emoji:"🌿", monsterPool:["spider", "slime", "frogling"],      boss:"swampBoss",   bg:"#2a3a1f", requiresPotion:false },
   mine:    { name:"Deep Mine",         emoji:"⛏️", monsterPool:["zombie", "skeleton", "bat"],        boss:"mineBoss",    bg:"#2a2a2a", requiresPotion:false },
   sky:     { name:"Sky Islands",       emoji:"☁️", monsterPool:["ghost", "icesprite", "windwisp"],   boss:"skyBoss",     bg:"#3a5a7a", requiresPotion:false },
   crystal: { name:"Crystal Cavern",    emoji:"🔮", monsterPool:["gemsprite", "icesprite", "spider"], boss:"crystalBoss", bg:"#2a1f4a", requiresPotion:false },
-  shadow:  { name:"Shadow Realm",      emoji:"🌌", monsterPool:["wraith", "skeleton", "creeper"],    boss:"shadowBoss",  bg:"#150f24", requiresPotion:false },
+  shadow:  { name:"Shadow Realm",      emoji:"🌌", monsterPool:["wraith", "skeleton", "creeper", "enderman"], boss:"shadowBoss",  bg:"#150f24", requiresPotion:false },
 };
 var BIOME_ORDER = ["forest", "desert", "frost", "volcano", "ocean", "swamp", "mine", "sky", "crystal", "shadow"];
 
@@ -447,6 +574,17 @@ function armorAdjustedDamage(save, dmg){
 function dist(x1, y1, x2, y2){
   var dx = x1 - x2, dy = y1 - y2;
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+// Darkens (negative percent) or lightens (positive) a #rrggbb color — used
+// to derive the alternating block-grid shade from each biome's base color.
+function shadeHex(hex, percent){
+  var num = parseInt(hex.replace("#", ""), 16);
+  var amt = Math.round(2.55 * percent);
+  var r = Math.max(0, Math.min(255, (num >> 16) + amt));
+  var g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amt));
+  var b = Math.max(0, Math.min(255, (num & 0x0000FF) + amt));
+  return "#" + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
 }
 
 // A random point at a fixed radius/angle around (x,y) — used to place boss
@@ -623,6 +761,101 @@ function drawBuilder(){
   c.fillStyle = "#4a3a20"; c.fillRect(40, 26, 10, 5); // nose/mouth block
   c.fillStyle = "#e8b98a"; c.fillRect(20, 34, 8, 26); c.fillRect(62, 34, 8, 26); // arms
   c.fillStyle = "#3a2a1a"; c.fillRect(28, 85, 12, 16); c.fillRect(50, 85, 12, 16); // legs
+}
+
+// ---------- Minecraft-ish blocky monster sprites ----------
+// Real blocky bodies instead of "an emoji in a circle" — a small set of
+// shared body archetypes (each MONSTER_TYPES entry picks one via
+// `archetype`) rather than a bespoke sprite per mob, except for creeper/
+// charged-creeper/enderman which get their real, recognizable Minecraft
+// shapes since those were asked for by name.
+function drawHumanoidMob(ctx, def, bob){
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-6, 2 + bob, 5, 9);
+  ctx.fillRect(1, 2 - bob, 5, 9);
+  ctx.fillRect(-7, -8, 14, 11);
+  ctx.fillRect(-6, -16, 12, 9);
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(-4, -13, 2, 2);
+  ctx.fillRect(2, -13, 2, 2);
+}
+function drawSpiderMob(ctx, def, bob){
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-9, -5 + bob, 18, 10);
+  ctx.strokeStyle = def.color;
+  ctx.lineWidth = 2;
+  for (var i = 0; i < 4; i++){
+    var yOff = -4 + i * 3;
+    ctx.beginPath(); ctx.moveTo(-8, yOff + bob); ctx.lineTo(-16, yOff - 3 + i + bob); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, yOff + bob); ctx.lineTo(16, yOff - 3 + i + bob); ctx.stroke();
+  }
+  ctx.fillStyle = "#ff3030";
+  ctx.fillRect(-4, -4 + bob, 2, 2);
+  ctx.fillRect(2, -4 + bob, 2, 2);
+}
+function drawBlobMob(ctx, def, bob){
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-9, -6 + bob, 18, 15);
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(-5, -1 + bob, 2, 2);
+  ctx.fillRect(3, -1 + bob, 2, 2);
+}
+function drawFloatyMob(ctx, def, bob){
+  ctx.globalAlpha *= 0.85;
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-9, -9 + bob, 18, 16);
+  ctx.fillStyle = "#2a2040";
+  ctx.fillRect(-5, -3 + bob, 2, 2);
+  ctx.fillRect(3, -3 + bob, 2, 2);
+  ctx.globalAlpha /= 0.85;
+}
+// The real creeper shape: a boxy head+body on 4 stubby legs, with the
+// classic pixelated frowning face. Charged creeper reuses this exact body
+// with a pulsing blue-white lightning glow behind it (its real MC look).
+function drawCreeperMob(ctx, def, bob, charged, flashWhite){
+  if (charged){
+    var glow = 0.5 + 0.5 * Math.sin(performance.now() / 90);
+    ctx.fillStyle = "rgba(140,200,255," + (0.35 + glow * 0.4) + ")";
+    ctx.fillRect(-13, -20 + bob, 26, 28);
+  }
+  var bodyColor = flashWhite ? "#ffffff" : def.color;
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(-5, 4 + bob, 4, 6); ctx.fillRect(1, 4 + bob, 4, 6);
+  ctx.fillRect(-5, -2 + bob, 4, 6); ctx.fillRect(1, -2 + bob, 4, 6);
+  ctx.fillRect(-8, -8 + bob, 16, 10);
+  ctx.fillRect(-7, -18 + bob, 14, 10);
+  ctx.fillStyle = flashWhite ? "#eee" : "#0e2a10";
+  ctx.fillRect(-5, -15 + bob, 3, 4);
+  ctx.fillRect(2, -15 + bob, 3, 4);
+  ctx.fillRect(-2, -11 + bob, 4, 3);
+  ctx.fillRect(-4, -9 + bob, 3, 3);
+  ctx.fillRect(1, -9 + bob, 3, 3);
+}
+// The real Enderman look: solid black, unusually tall and thin, long limbs,
+// glowing purple eyes and no visible mouth.
+function drawEndermanMob(ctx, def, bob){
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(-3, 8 + bob, 3, 14); ctx.fillRect(1, 8 + bob, 3, 14);
+  ctx.fillRect(-5, -10 + bob, 10, 19);
+  ctx.fillRect(-7, -6 + bob, 3, 13); ctx.fillRect(4, -6 + bob, 3, 13);
+  ctx.fillRect(-5, -20 + bob, 10, 10);
+  ctx.fillStyle = "#e070ff";
+  ctx.fillRect(-3, -17 + bob, 2, 2);
+  ctx.fillRect(2, -17 + bob, 2, 2);
+}
+function drawMonsterSprite(ctx, m, def, ts){
+  var bob = Math.sin(ts / 220 + m.id) * 1.5;
+  var fusing = m.fuseStartedAt != null && Math.floor(ts / 100) % 2 === 0;
+  var arch = def.archetype || "blob";
+  ctx.save();
+  ctx.translate(m.x, m.y);
+  if (arch === "humanoid") drawHumanoidMob(ctx, def, bob);
+  else if (arch === "spider") drawSpiderMob(ctx, def, bob);
+  else if (arch === "creeper") drawCreeperMob(ctx, def, bob, !!def.charged, fusing);
+  else if (arch === "floaty") drawFloatyMob(ctx, def, bob);
+  else if (arch === "enderman") drawEndermanMob(ctx, def, bob);
+  else drawBlobMob(ctx, def, bob);
+  ctx.restore();
 }
 
 // ---------- Minecraft-ish blocky player sprite ----------
@@ -996,6 +1229,7 @@ function maybeBossSummon(boss, ts){
     boss.summonsUsed++;
   }
   flashWaveBanner(def.emoji + " " + def.name + " summons help!");
+  sfxBossSummon();
 }
 
 function showBossHpBar(show){
@@ -1086,6 +1320,7 @@ function performAttack(){
   var weapon = WEAPONS[save.equippedWeapon] || WEAPONS.wood;
   run.player.attackCooldownUntil = nowMs + weapon.cooldown;
   run.player.attackAnimT = 0;
+  sfxSwing(weapon.ranged);
 
   if (weapon.ranged){
     var nearest = null, nearestDist = Infinity;
@@ -1118,6 +1353,7 @@ function maybeShockwave(weapon){
   var dmg = Math.max(1, Math.ceil(weapon.dmg * 0.75));
   hits.forEach(function (m) { damageMonster(m, dmg); });
   run.shockwaves.push({ x: run.player.x, y: run.player.y, t: 0 });
+  sfxShockwave();
 }
 function updateShockwaves(dt){
   if (!run) return;
@@ -1129,7 +1365,8 @@ function updateShockwaves(dt){
 
 function damageMonster(m, dmg){
   m.hp -= dmg;
-  if (m.hp <= 0) killMonster(m);
+  if (m.hp <= 0) { sfxMonsterDeath(); killMonster(m); }
+  else sfxHit();
 }
 
 // killedBySelf is true only when a Boom Creeper detonates itself — a creeper
@@ -1155,6 +1392,7 @@ function killMonster(m, killedBySelf){
 
 var MAX_BOMBS_HELD = 3;
 function collectDrop(drop){
+  sfxPickup();
   if (drop.type === "emerald"){
     save.emeralds += 1;
     run.waveEmeraldsThisRun += 1;
@@ -1174,6 +1412,7 @@ function endRun(victory, reason){
   run.ended = true;
   if (rafId) cancelAnimationFrame(rafId);
   showBossHpBar(false);
+  if (victory) sfxVictory(); else sfxKnockout();
   var biome = BIOMES[run.biome];
   var bossDef = BOSSES[biome.boss];
   if (victory){
@@ -1282,6 +1521,7 @@ function updateMonsters(dt, ts){
       if (distToPlayer <= AGGRO_RADIUS){
         m.active = true;
         flashWaveBanner("⚔️ Enemies spotted!");
+        sfxEnemiesSpotted();
       } else {
         return;
       }
@@ -1289,14 +1529,18 @@ function updateMonsters(dt, ts){
     if (m.isBoss && !run.bossSeen && distToPlayer <= VISION_RADIUS){
       run.bossSeen = true;
       flashWaveBanner("⚠️ " + BOSSES[m.type].name + " is hunting you!");
+      sfxBossSighted();
     }
 
     if (def.fuse){
-      if (distToPlayer <= CREEPER_TRIGGER_RADIUS){
+      var triggerRadius = def.triggerRadius || CREEPER_TRIGGER_RADIUS;
+      var blastRadius = def.blastRadius || CREEPER_BLAST_RADIUS;
+      if (distToPlayer <= triggerRadius){
         if (m.fuseStartedAt == null) m.fuseStartedAt = ts;
         else if (ts - m.fuseStartedAt >= CREEPER_FUSE_MS){
-          var stillClose = distToPlayer <= CREEPER_BLAST_RADIUS;
-          if (stillClose) applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
+          var stillClose = distToPlayer <= blastRadius;
+          if (stillClose && applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts)) sfxPlayerHurt();
+          sfxExplosion();
           killMonster(m, true);
           return;
         }
@@ -1311,6 +1555,20 @@ function updateMonsters(dt, ts){
         m.lastShotAt = ts;
         run.arrows.push({ x: m.x, y: m.y, vx: (dx / distToPlayer) * 200, vy: (dy / distToPlayer) * 200, dmg: def.dmg, hostile: true });
       }
+    } else if (def.teleports){
+      // Enderman: blinks toward the player instead of walking when far away.
+      if (distToPlayer > 60 && ts - (m.lastTeleportAt || 0) > (def.teleportCooldown || 2500)){
+        var tp = positionNear(run.player.x, run.player.y, 70);
+        m.x = Math.max(MARGIN, Math.min(WORLD_W - MARGIN, tp.x));
+        m.y = Math.max(MARGIN, Math.min(WORLD_H - MARGIN, tp.y));
+        m.lastTeleportAt = ts;
+        sfxTeleport();
+      } else {
+        moveToward(m, dx, dy, distToPlayer, def.speed, dt);
+      }
+      if (distToPlayer < 16){
+        if (applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts)) sfxPlayerHurt();
+      }
     } else {
       if (def.erratic){
         m.jitterX += (Math.random() - 0.5) * 60 * dt;
@@ -1320,7 +1578,7 @@ function updateMonsters(dt, ts){
       }
       moveToward(m, dx + m.jitterX, dy + m.jitterY, Math.sqrt(Math.pow(dx + m.jitterX, 2) + Math.pow(dy + m.jitterY, 2)) || 1, def.speed, dt);
       if (distToPlayer < 16){
-        applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts);
+        if (applyDamageToPlayer(run.player, armorAdjustedDamage(save, def.dmg), ts)) sfxPlayerHurt();
       }
     }
     if (m.isBoss) maybeBossSummon(m, ts);
@@ -1344,7 +1602,7 @@ function updateArrows(dt){
     if (a.hostile){
       var dx = a.x - run.player.x, dy = a.y - run.player.y;
       if (Math.sqrt(dx * dx + dy * dy) < 14){
-        applyDamageToPlayer(run.player, armorAdjustedDamage(save, a.dmg), ts);
+        if (applyDamageToPlayer(run.player, armorAdjustedDamage(save, a.dmg), ts)) sfxPlayerHurt();
         return false;
       }
     } else {
@@ -1385,6 +1643,7 @@ function explodeBomb(x, y){
   var hits = monstersInRange(x, y, BOMB_BLAST_RADIUS, run.monsters);
   hits.forEach(function (m) { damageMonster(m, BOMB_DAMAGE); });
   run.bombExplosions.push({ x: x, y: y, t: 0 });
+  sfxExplosion();
 }
 function updateBombs(dt){
   if (!run) return;
@@ -1421,6 +1680,7 @@ function usePower(){
   var nowMs = performance.now();
   if (nowMs < run.player.powerCooldownUntil) return;
   run.player.powerCooldownUntil = nowMs + def.cooldown;
+  sfxPower(powerId);
 
   if (powerId === "dash"){
     var dir = facingVector(run.player.facing);
@@ -1451,6 +1711,19 @@ function draw(){
   dCtx.fillStyle = biomeBg;
   dCtx.fillRect(run.camera.x, run.camera.y, ARENA_W, ARENA_H);
 
+  // A simple Minecraft-style block grid over the ground — alternating
+  // shaded 40px tiles, like grass/dirt blocks, instead of a flat color.
+  var blockSize = 40;
+  var blockShade = shadeHex(biomeBg, -12);
+  var startBX = Math.floor(run.camera.x / blockSize) * blockSize;
+  var startBY = Math.floor(run.camera.y / blockSize) * blockSize;
+  dCtx.fillStyle = blockShade;
+  for (var gx = startBX; gx < run.camera.x + ARENA_W; gx += blockSize){
+    for (var gy = startBY; gy < run.camera.y + ARENA_H; gy += blockSize){
+      if (((gx / blockSize) + (gy / blockSize)) % 2 === 0) dCtx.fillRect(gx, gy, blockSize, blockSize);
+    }
+  }
+
   run.hazards.forEach(function (h) {
     if (dist(h.x, h.y, px, py) > VISION_RADIUS + h.r) return;
     var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220);
@@ -1472,17 +1745,23 @@ function draw(){
 
   run.monsters.forEach(function (m) {
     if (dist(m.x, m.y, px, py) > VISION_RADIUS) return;
-    var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
-    var fusing = m.fuseStartedAt != null;
-    var radius = m.isBoss ? 22 : 15;
-    dCtx.globalAlpha = (!m.isBoss && !m.active) ? 0.5 : 1;
-    dCtx.beginPath();
-    dCtx.fillStyle = fusing && Math.floor(performance.now() / 100) % 2 === 0 ? "#ffffff" : def.color;
-    dCtx.arc(m.x, m.y, radius, 0, Math.PI * 2);
-    dCtx.fill();
-    dCtx.font = (m.isBoss ? "26px" : "18px") + " sans-serif";
-    dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
-    dCtx.fillText(def.emoji, m.x, m.y);
+    if (m.isBoss){
+      // Bosses stay a big colored circle + emoji — already visually distinct
+      // (size, HP bar) without needing a bespoke blocky sprite each.
+      var bossDef = BOSSES[m.type];
+      var fusing = m.fuseStartedAt != null;
+      dCtx.beginPath();
+      dCtx.fillStyle = fusing && Math.floor(performance.now() / 100) % 2 === 0 ? "#ffffff" : bossDef.color;
+      dCtx.arc(m.x, m.y, 22, 0, Math.PI * 2);
+      dCtx.fill();
+      dCtx.font = "26px sans-serif";
+      dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
+      dCtx.fillText(bossDef.emoji, m.x, m.y);
+      return;
+    }
+    var def = MONSTER_TYPES[m.type];
+    dCtx.globalAlpha = m.active ? 1 : 0.5;
+    drawMonsterSprite(dCtx, m, def, performance.now());
     dCtx.globalAlpha = 1;
   });
 
