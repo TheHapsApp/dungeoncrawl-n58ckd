@@ -371,6 +371,9 @@ function sfxVictory(){
 function sfxKnockout(){
   sfxSlide(300, 100, 0, 0.4, "sawtooth", 0.13);
 }
+function sfxFootstep(toggle){
+  sfxNoise(0, 0.045, 0.045, toggle ? 900 : 650);
+}
 
 // ---------- weapons ----------
 // Costs lowered across the board so new gear comes faster.
@@ -491,6 +494,7 @@ var MIN_DIST_FROM_START = 260; // camps/hazards never generate right on top of t
 var PLAYER_MAX_HP = 20; // 10 hearts
 var PLAYER_SPEED = 130; // px/sec
 var INVULN_MS = 800;
+var FOOTSTEP_INTERVAL_MS = 260; // brisk walk cadence, alternates left/right pitch
 var CREEPER_FUSE_MS = 1100;
 var CREEPER_TRIGGER_RADIUS = 34;
 var CREEPER_BLAST_RADIUS = 50;
@@ -855,6 +859,58 @@ function drawMonsterSprite(ctx, m, def, ts){
   else if (arch === "floaty") drawFloatyMob(ctx, def, bob);
   else if (arch === "enderman") drawEndermanMob(ctx, def, bob);
   else drawBlobMob(ctx, def, bob);
+  ctx.restore();
+}
+// A big blocky armored guardian — same Minecraft-Dungeons block-body
+// language as the regular mobs, just scaled way up with shoulder pauldrons
+// and a crown/horn accent so it reads as a boss on sight. Every boss shares
+// this one silhouette (10 bespoke boss bodies would be a lot of sprites for
+// creatures the kids never study up close mid-fight); what tells them apart
+// is `def.color` (tinting the whole body + aura) and a small emoji insignia
+// floating above the head — the boss's real name still shows in the HUD label.
+function drawBossMob(ctx, def, bob){
+  var pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+  var prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * (0.22 + pulse * 0.18);
+  ctx.fillStyle = def.color;
+  ctx.beginPath();
+  ctx.arc(0, -4, 30 + pulse * 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = prevAlpha;
+
+  ctx.fillStyle = shadeHex(def.color, -25);
+  ctx.fillRect(-11, 8 + bob, 8, 14);
+  ctx.fillRect(3, 8 - bob, 8, 14);
+
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-15, -14 + bob, 30, 24);
+
+  ctx.fillStyle = shadeHex(def.color, -15);
+  ctx.beginPath();
+  ctx.moveTo(-15, -14 + bob); ctx.lineTo(-23, -8 + bob); ctx.lineTo(-15, -4 + bob); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(15, -14 + bob); ctx.lineTo(23, -8 + bob); ctx.lineTo(15, -4 + bob); ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = def.color;
+  ctx.fillRect(-9, -28 + bob, 18, 15);
+  ctx.fillStyle = shadeHex(def.color, -20);
+  ctx.fillRect(-9, -32 + bob, 4, 5);
+  ctx.fillRect(-2, -35 + bob, 4, 8);
+  ctx.fillRect(5, -32 + bob, 4, 5);
+
+  ctx.fillStyle = "#fff5c0";
+  ctx.fillRect(-5, -22 + bob, 3, 3);
+  ctx.fillRect(2, -22 + bob, 3, 3);
+
+  ctx.font = "13px sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(def.emoji, 0, -41 + bob);
+}
+function drawBossSprite(ctx, m, def, ts){
+  var bob = Math.sin(ts / 260 + m.id) * 2;
+  ctx.save();
+  ctx.translate(m.x, m.y);
+  drawBossMob(ctx, def, bob);
   ctx.restore();
 }
 
@@ -1481,6 +1537,11 @@ function updatePlayer(dt, ts){
     p.x = Math.max(MARGIN, Math.min(WORLD_W - MARGIN, p.x + vx * PLAYER_SPEED * dt));
     p.y = Math.max(MARGIN, Math.min(WORLD_H - MARGIN, p.y + vy * PLAYER_SPEED * dt));
     p.animT += dt;
+    if (ts - (p.lastFootstepAt || 0) >= FOOTSTEP_INTERVAL_MS){
+      p.lastFootstepAt = ts;
+      p.footstepToggle = !p.footstepToggle;
+      sfxFootstep(p.footstepToggle);
+    }
   }
   p.invulnActive = ts < p.invulnUntil;
   if (p.attackAnimT != null){
@@ -1746,17 +1807,7 @@ function draw(){
   run.monsters.forEach(function (m) {
     if (dist(m.x, m.y, px, py) > VISION_RADIUS) return;
     if (m.isBoss){
-      // Bosses stay a big colored circle + emoji — already visually distinct
-      // (size, HP bar) without needing a bespoke blocky sprite each.
-      var bossDef = BOSSES[m.type];
-      var fusing = m.fuseStartedAt != null;
-      dCtx.beginPath();
-      dCtx.fillStyle = fusing && Math.floor(performance.now() / 100) % 2 === 0 ? "#ffffff" : bossDef.color;
-      dCtx.arc(m.x, m.y, 22, 0, Math.PI * 2);
-      dCtx.fill();
-      dCtx.font = "26px sans-serif";
-      dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
-      dCtx.fillText(bossDef.emoji, m.x, m.y);
+      drawBossSprite(dCtx, m, BOSSES[m.type], performance.now());
       return;
     }
     var def = MONSTER_TYPES[m.type];
