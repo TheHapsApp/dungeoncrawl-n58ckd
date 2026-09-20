@@ -1229,6 +1229,8 @@ function newRun(biomeId){
     thrownBombs: [],
     bombExplosions: [],
     shockwaves: [],
+    deathBursts: [],
+    particles: [],
     bombs: 0,
     bossSeen: false,
     waveEmeraldsThisRun: 0,
@@ -1349,15 +1351,19 @@ document.querySelectorAll(".dpad button").forEach(function (btn) {
   btn.addEventListener("pointerup", release);
   btn.addEventListener("pointerleave", release);
 });
+// Movement keeps the arrow keys (plus W/S for up/down) — A and D are freed up
+// from left/right movement so they can be dedicated action buttons instead:
+// A swings the equipped weapon, D uses the equipped power. Arrow keys still
+// cover all 4 directions on their own, so movement isn't lost.
 window.addEventListener("keydown", function (e) {
-  var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down", a:"left", d:"right" };
+  var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down" };
   if (map[e.key]) heldDirs[map[e.key]] = true;
-  if (e.key === " ") performAttack();
-  if (e.key === "e" || e.key === "E") usePower();
+  if (e.key === " " || e.key === "a" || e.key === "A") performAttack();
+  if (e.key === "e" || e.key === "E" || e.key === "d" || e.key === "D") usePower();
   if (e.key === "q" || e.key === "Q") throwBomb();
 });
 window.addEventListener("keyup", function (e) {
-  var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down", a:"left", d:"right" };
+  var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down" };
   if (map[e.key]) heldDirs[map[e.key]] = false;
 });
 document.getElementById("attackBtn").addEventListener("pointerdown", function (e) {
@@ -1419,6 +1425,57 @@ function updateShockwaves(dt){
   });
 }
 
+// Death bursts: a growing ring + a spray of small particles wherever a
+// monster dies. Regular monsters get a small burst that fades out quickly
+// (the ring never gets far — about an eighth of the map before it's gone).
+// The boss gets a much bigger, longer, more dramatic version whose ring
+// keeps growing until it's washed over the whole map (the fog-of-war overlay
+// still only lets the player actually SEE it within their vision radius).
+var MONSTER_DEATH_RING_MAX = 175;
+var MONSTER_DEATH_RING_MS = 550;
+var BOSS_DEATH_RING_MAX = 1600;
+var BOSS_DEATH_RING_MS = 1800;
+function spawnDeathBurst(x, y, isBoss, color){
+  // Lightened well past the source color (monster bodies are often dark/muted
+  // to blend into their own biome) so the burst actually reads against a
+  // same-toned background instead of disappearing into it.
+  var ringColor = shadeHex(color || "#ffcf6a", 70);
+  run.deathBursts.push({
+    x: x, y: y, t: 0,
+    maxR: isBoss ? BOSS_DEATH_RING_MAX : MONSTER_DEATH_RING_MAX,
+    dur: isBoss ? BOSS_DEATH_RING_MS : MONSTER_DEATH_RING_MS,
+    color: ringColor,
+  });
+  var count = isBoss ? 28 : 8;
+  var speedMin = isBoss ? 90 : 40, speedMax = isBoss ? 260 : 110;
+  var baseLife = isBoss ? 850 : 380;
+  var size = isBoss ? 3.5 : 2;
+  for (var i = 0; i < count; i++){
+    var ang = Math.random() * Math.PI * 2;
+    var spd = speedMin + Math.random() * (speedMax - speedMin);
+    run.particles.push({
+      x: x, y: y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+      t: 0, life: baseLife * (0.7 + Math.random() * 0.6), size: size, color: ringColor,
+    });
+  }
+}
+function updateDeathBursts(dt){
+  if (!run) return;
+  run.deathBursts = run.deathBursts.filter(function (b) {
+    b.t += dt * 1000;
+    return b.t < b.dur;
+  });
+}
+function updateParticles(dt){
+  if (!run) return;
+  run.particles = run.particles.filter(function (pt) {
+    pt.t += dt * 1000;
+    pt.x += pt.vx * dt; pt.y += pt.vy * dt;
+    pt.vx *= 0.94; pt.vy *= 0.94;
+    return pt.t < pt.life;
+  });
+}
+
 function damageMonster(m, dmg){
   m.hp -= dmg;
   if (m.hp <= 0) { sfxMonsterDeath(); killMonster(m); }
@@ -1430,6 +1487,8 @@ function damageMonster(m, dmg){
 function killMonster(m, killedBySelf){
   var idx = run.monsters.indexOf(m);
   if (idx !== -1) run.monsters.splice(idx, 1);
+  var def = m.isBoss ? BOSSES[m.type] : MONSTER_TYPES[m.type];
+  spawnDeathBurst(m.x, m.y, !!m.isBoss, def && def.color);
   if (m.canSplit){
     splitSlimeChildren(m).forEach(function (child) {
       child.id = run.nextId++;
@@ -1443,7 +1502,9 @@ function killMonster(m, killedBySelf){
   if (m.type === "creeper" && !killedBySelf && rollBombDrop()){
     run.drops.push({ id: run.nextId++, type: "bomb", x: m.x, y: m.y });
   }
-  if (m.isBoss) endRun(true);
+  // Let the boss's death ring actually grow out across the map before
+  // cutting to the victory screen, instead of ending the run the instant it dies.
+  if (m.isBoss) setTimeout(function () { endRun(true); }, BOSS_DEATH_RING_MS);
 }
 
 var MAX_BOMBS_HELD = 3;
@@ -1514,6 +1575,8 @@ function gameLoop(ts){
   updateBombs(dt);
   updateBombExplosions(dt);
   updateShockwaves(dt);
+  updateDeathBursts(dt);
+  updateParticles(dt);
   updateDrops();
   updateBossHpBar();
   draw();
@@ -1843,6 +1906,26 @@ function draw(){
     dCtx.lineWidth = 5 * (1 - p) + 1;
     dCtx.arc(sw.x, sw.y, SHOCKWAVE_RADIUS * p, 0, Math.PI * 2);
     dCtx.stroke();
+  });
+
+  run.deathBursts.forEach(function (b) {
+    var p = Math.min(1, b.t / b.dur);
+    var prevAlpha = dCtx.globalAlpha;
+    dCtx.globalAlpha = prevAlpha * (1 - p);
+    dCtx.beginPath();
+    dCtx.strokeStyle = b.color;
+    dCtx.lineWidth = b.maxR > 300 ? 8 : 3;
+    dCtx.arc(b.x, b.y, b.maxR * p, 0, Math.PI * 2);
+    dCtx.stroke();
+    dCtx.globalAlpha = prevAlpha;
+  });
+  run.particles.forEach(function (pt) {
+    var p = pt.t / pt.life;
+    var prevAlpha = dCtx.globalAlpha;
+    dCtx.globalAlpha = prevAlpha * (1 - p);
+    dCtx.fillStyle = pt.color;
+    dCtx.fillRect(pt.x - pt.size / 2, pt.y - pt.size / 2, pt.size, pt.size);
+    dCtx.globalAlpha = prevAlpha;
   });
 
   if (run.player.attackAnimT != null){
