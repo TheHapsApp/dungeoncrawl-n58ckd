@@ -1231,6 +1231,7 @@ function newRun(biomeId){
     shockwaves: [],
     deathBursts: [],
     particles: [],
+    exitHole: null,
     bombs: 0,
     bossSeen: false,
     waveEmeraldsThisRun: 0,
@@ -1359,7 +1360,8 @@ window.addEventListener("keydown", function (e) {
   var map = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right", w:"up", s:"down" };
   if (map[e.key]) heldDirs[map[e.key]] = true;
   if (e.key === " " || e.key === "a" || e.key === "A") performAttack();
-  if (e.key === "e" || e.key === "E" || e.key === "d" || e.key === "D") usePower();
+  if (e.key === "e" || e.key === "E"){ if (!tryUseExitHole()) usePower(); }
+  if (e.key === "d" || e.key === "D") usePower();
   if (e.key === "q" || e.key === "Q") throwBomb();
 });
 window.addEventListener("keyup", function (e) {
@@ -1374,6 +1376,15 @@ document.getElementById("attackBtn").addEventListener("pointerdown", function (e
 document.getElementById("attackBtn").addEventListener("pointerup", function () { this.classList.remove("pressed"); });
 document.getElementById("powerBtn").addEventListener("pointerdown", function (e) { e.preventDefault(); usePower(); });
 document.getElementById("bombBtn").addEventListener("pointerdown", function (e) { e.preventDefault(); throwBomb(); });
+// Tap/click the exit hole directly as a touchscreen equivalent to pressing E on it.
+dCanvas.addEventListener("pointerdown", function (e) {
+  if (!run || run.ended || !run.exitHole) return;
+  var rect = dCanvas.getBoundingClientRect();
+  var scaleX = dCanvas.width / rect.width, scaleY = dCanvas.height / rect.height;
+  var worldX = (e.clientX - rect.left) * scaleX + run.camera.x;
+  var worldY = (e.clientY - rect.top) * scaleY + run.camera.y;
+  if (dist(worldX, worldY, run.exitHole.x, run.exitHole.y) <= EXIT_HOLE_TAP_RADIUS) endRun(true);
+});
 
 function performAttack(){
   if (!run || run.ended) return;
@@ -1502,9 +1513,37 @@ function killMonster(m, killedBySelf){
   if (m.type === "creeper" && !killedBySelf && rollBombDrop()){
     run.drops.push({ id: run.nextId++, type: "bomb", x: m.x, y: m.y });
   }
-  // Let the boss's death ring actually grow out across the map before
-  // cutting to the victory screen, instead of ending the run the instant it dies.
-  if (m.isBoss) setTimeout(function () { endRun(true); }, BOSS_DEATH_RING_MS);
+  // Let the boss's death ring/particles fully play out before the loot and
+  // exit hole appear — the run doesn't actually end until the player walks
+  // up to the hole and presses E (see tryUseExitHole), not automatically.
+  if (m.isBoss){
+    var bx = m.x, by = m.y;
+    setTimeout(function () { spawnBossLoot(bx, by); }, BOSS_DEATH_RING_MS);
+  }
+}
+
+var BOSS_LOOT_EMERALDS = 10;
+var EXIT_HOLE_RADIUS = 30; // how close the player must be to press E and use the hole
+var EXIT_HOLE_TAP_RADIUS = 44; // a bit more forgiving for a touchscreen tap
+function spawnBossLoot(x, y){
+  if (!run || run.ended) return;
+  for (var i = 0; i < BOSS_LOOT_EMERALDS; i++){
+    var ang = Math.random() * Math.PI * 2;
+    var r = 10 + Math.random() * 50;
+    run.drops.push({ id: run.nextId++, type: "emerald", x: x + Math.cos(ang) * r, y: y + Math.sin(ang) * r });
+  }
+  run.exitHole = { x: x, y: y };
+}
+// Called on an 'E' keypress or a tap on the hole — only actually leaves once
+// the player is standing close enough to it.
+function tryUseExitHole(){
+  if (!run || run.ended || !run.exitHole) return false;
+  var dx = run.exitHole.x - run.player.x, dy = run.exitHole.y - run.player.y;
+  if (Math.sqrt(dx * dx + dy * dy) <= EXIT_HOLE_RADIUS){
+    endRun(true);
+    return true;
+  }
+  return false;
 }
 
 var MAX_BOMBS_HELD = 3;
@@ -1548,8 +1587,10 @@ function endRun(victory, reason){
 document.getElementById("resultBackBtn").addEventListener("click", function () {
   document.getElementById("resultOverlay").classList.remove("show");
   run = null;
-  renderMap();
-  showScreen("screen-map");
+  // This button has always said "Back to Hub" — actually send the player to
+  // the hub (Builder/shop) now, not the biome map, to match its own label.
+  refreshHubUI();
+  showScreen("screen-hub");
 });
 document.getElementById("leaveDungeonBtn").addEventListener("click", function () {
   if (rafId) cancelAnimationFrame(rafId);
@@ -1866,6 +1907,21 @@ function draw(){
     dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
     dCtx.fillText(DROP_EMOJI[d.type] || "❔", d.x, d.y);
   });
+
+  if (run.exitHole && dist(run.exitHole.x, run.exitHole.y, px, py) <= VISION_RADIUS){
+    var holePulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    dCtx.beginPath();
+    dCtx.fillStyle = "rgba(10,10,20,0.92)";
+    dCtx.arc(run.exitHole.x, run.exitHole.y, 20, 0, Math.PI * 2);
+    dCtx.fill();
+    dCtx.strokeStyle = "rgba(255,226,122," + (0.5 + holePulse * 0.5) + ")";
+    dCtx.lineWidth = 3;
+    dCtx.stroke();
+    dCtx.fillStyle = "#ffe27a";
+    dCtx.font = "bold 16px sans-serif";
+    dCtx.textAlign = "center"; dCtx.textBaseline = "middle";
+    dCtx.fillText("E", run.exitHole.x, run.exitHole.y - 1);
+  }
 
   run.monsters.forEach(function (m) {
     if (dist(m.x, m.y, px, py) > VISION_RADIUS) return;
